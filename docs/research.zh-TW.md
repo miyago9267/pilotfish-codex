@@ -1,5 +1,7 @@
 # Fable 5 多模型協作研究報告
 
+> English version: [research.md](./research.md)
+
 ## 文件目的
 
 這份文件整理 2026 年 7 月初針對「如何最大化 Claude Fable 5 價值」所做的一輪有出處研究：Fable 5 相對 Opus 4.8 的真實強項與不值得用的場景、Claude 訂閱制的配額經濟學、Claude Code 官方提供的多模型協作機制，以及社群的實測數字與模式。pilotfish 的三層架構（見 [design.md](./design.md)）就是這份研究的落地結論。研究方法為四個並行研究代理（官方文件、社群模式、訂閱經濟、Claude Code 機制）加一輪對照 code.claude.com 官方文件的驗證；資料時點為 2026-07-08。
