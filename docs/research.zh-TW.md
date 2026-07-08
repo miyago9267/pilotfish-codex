@@ -38,7 +38,7 @@
 | 模糊需求 | Navigating ambiguity 明顯較佳 |
 | 委派協作 | Dispatch 並維持平行 subagents 更可靠——天生的 orchestrator |
 
-代表性基準：SWE-Bench Pro 80.3%（Opus 4.8 為 69.2%）、Cognition FrontierCode 29.3%（Opus 4.8 為 13.4%）。
+代表性基準：SWE-Bench Pro 80.3%（Opus 4.8 為 69.2%）、Cognition FrontierCode 29.3%（Opus 4.8 為 13.4%）——均為 Anthropic 官方自報數字（自家 scaffolding／system card），尚未經第三方獨立驗證。
 
 ## 何時不該用 Fable 5
 
@@ -57,9 +57,9 @@
 | 機制 | 內容 |
 |---|---|
 | 雙層限額 | 5 小時滾動視窗＋每週上限；配額池跨 Claude Code / Claude.ai / Cowork 共用 |
-| 雙桶每週制 | 「所有模型」一桶＋「**Sonnet 專用**」另一桶（2025-11 起）——把執行工作路由給 Sonnet 等於使用另一個池子 |
+| 雙桶每週制 | 共用的「所有模型」桶＋「**Sonnet 專用**」額外桶（2025-11 起）——Sonnet 除了計入「所有模型」桶外，還有專用桶提供額外額度（現行版本回報兩桶同時扣），並非完全獨立的池子，但實質擴大了 Sonnet 工作的可用量 |
 | Fable 5 倍率 | 官方 UI 原文「Uses your limits ~2x faster than Opus」；agentic 重度使用實際更陡（有 Max $200 用戶 13 分鐘燒完 5 小時視窗的極端案例） |
-| 相對單價（API 比價） | Fable 5 = Opus 的 2 倍；Sonnet 5 ≈ 0.6 倍；Haiku 4.5 ≈ 0.2 倍 |
+| 相對單價（API 比價） | Fable 5 = Opus 的 2 倍；Sonnet 5 標準價 ≈ 0.6 倍（$3/$15；導入期 $2/$10 至 2026-08-31，約 0.4 倍）；Haiku 4.5 ≈ 0.2 倍 |
 | 官方口徑 | 各方案絕對 token 數從未公布；只有倍率（Max 5x / 20x）與 Fable ~2x 為官方說法 |
 
 Fable 5 在訂閱方案內的時間線（截至 2026-07-08）：
@@ -88,7 +88,7 @@ Fable 5 在訂閱方案內的時間線（截至 2026-07-08）：
 | `fallbackModel`（settings）/ `--fallback-model` | 陣列切換鏈；主模型過載或不可用（非 auth/計費/rate-limit 錯誤）時依序自動切換並通知 |
 | `opusplan` alias | Plan mode 用 Opus 思考、離開後切 Sonnet 執行——內建的「強模型想、便宜模型做」 |
 | `availableModels`（settings） | 白名單，同時約束主 session、subagent frontmatter、Task 的 model 參數；超出名單的值被靜默跳過改為繼承 |
-| `[1m]` 後綴 | 可加在 alias 或完整 model ID 上啟用 1M context |
+| `[1m]` 後綴 | 啟用 1M context；文件明列支援 `sonnet`/`opus`/`opusplan` alias 與完整 model ID——`best` 不在列（實測 `best[1m]` 不報錯，但建議用純 `best`；Fable 5 本身預設即 1M） |
 | CLAUDE.md 與模型 | **不能**改主模型（settings / `/model` / `--model` 才行）——CLAUDE.md 管的是委派行為政策 |
 | 內建 Explore agent | v2.1.198 起繼承主對話模型（Claude API 上以 Opus 封頂）；自建同名 `Explore.md` 可覆寫回 Haiku |
 | 版本釘選 | `ANTHROPIC_DEFAULT_OPUS_MODEL` 等 env 可把 alias 釘到特定版本（third-party provider 部署適用） |

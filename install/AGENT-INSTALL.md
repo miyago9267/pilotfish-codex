@@ -8,7 +8,7 @@ pilotfish is a global multi-model orchestration layer for Claude Code. It touche
 
 | Target | Change |
 |---|---|
-| `~/.claude/settings.json` | Set `model` to `"best[1m]"`, add `fallbackModel`, conditionally extend `availableModels` |
+| `~/.claude/settings.json` | Set `model` to `"best"`, add `fallbackModel`, conditionally extend `availableModels` |
 | `~/.claude/agents/` | Install six role agent files: `scout.md`, `Explore.md`, `mech-executor.md`, `executor.md`, `verifier.md`, `security-executor.md` |
 | `~/.claude/CLAUDE.md` | Insert one `## Orchestration` section between `<!-- pilotfish:begin -->` and `<!-- pilotfish:end -->` markers |
 
@@ -31,13 +31,18 @@ Show the user a table of every change you intend to make: each file, the exact m
 
 ## Step 3 — Apply
 
-### 3.1 Backup
+### 3.1 Backup and directories
 
 ```bash
-mkdir -p ~/.claude/backups
-cp ~/.claude/settings.json ~/.claude/backups/settings.json.pilotfish-$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
+mkdir -p ~/.claude/backups ~/.claude/agents
+# settings backup: FIRST install only — the pristine pre-pilotfish state must be preserved
+ls ~/.claude/backups/settings.json.pilotfish-* >/dev/null 2>&1 || \
+  cp ~/.claude/settings.json ~/.claude/backups/settings.json.pilotfish-$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
+# CLAUDE.md backup: every run
 cp ~/.claude/CLAUDE.md ~/.claude/backups/CLAUDE.md.pilotfish-$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
 ```
+
+> **Note:** If `~/.claude/settings.json` did not exist before this install (fresh machine), there is no settings backup — record in your final summary that the pre-install state had **no `model` key**, so a future uninstall knows to *remove* the key rather than restore a value.
 
 ### 3.2 settings.json — merge, key by key
 
@@ -45,13 +50,13 @@ Never rewrite the whole file; edit only these keys and preserve everything else:
 
 | Key | Rule |
 |---|---|
-| `model` | If absent → set `"best[1m]"`. If present and different → **ask** the user: keep their value, or switch to `"best[1m]"` (explain: `best` = Fable 5 when the account has access, otherwise latest Opus — this is the frontier-fallback mechanism). If already `"best[1m]"` → no change. |
+| `model` | If absent → set `"best"`. If present and different → **ask** the user: keep their value, or switch to `"best"` (explain: `best` = Fable 5 when the account has access, otherwise latest Opus — this is the frontier-fallback mechanism). If already `"best"` → no change. |
 | `fallbackModel` | If absent → add `["opus", "sonnet"]` (handles overload/unavailability, distinct from the `best` alias which handles access). If present → leave it and note it in the summary. |
 | `availableModels` | **Only if the key already exists** (it is an allowlist): ensure it contains `"opus"`, `"sonnet"`, `"haiku"`, and the chosen main-model value — append whatever is missing. If the key is absent → do not add it (absent = unrestricted, which is fine). |
 
 Validate afterwards: `jq empty ~/.claude/settings.json`.
 
-> **Note:** On older Claude Code versions the `best` alias or the `[1m]` suffix may be rejected at startup. If the user reports that, fall back in this order: `"best"` → `"opus[1m]"` → `"opus"`, and suggest updating Claude Code.
+> **Note:** On older Claude Code versions the `best` alias may be rejected at startup. If the user reports that, fall back to `"opus[1m]"` (or `"opus"`), and suggest updating Claude Code. Users who want *guaranteed* 1M context even when `best` resolves to Opus can choose `"opus[1m]"` themselves — the `[1m]` suffix is documented for `sonnet`/`opus`/`opusplan`/full model IDs, not for `best`.
 
 ### 3.3 Agent files
 
@@ -69,11 +74,14 @@ For each of the six files in `templates/agents/`, write it to `~/.claude/agents/
 
 The canonical section content is [templates/claude-md.orchestration.md](../templates/claude-md.orchestration.md) — it already includes the begin/end markers.
 
-| Existing state | Action |
+Before writing, count the markers: `grep -c "pilotfish:begin" ~/.claude/CLAUDE.md`. The count must be `0` (fresh) or `1` (upgrade).
+
+| Marker count | Action |
 |---|---|
-| `~/.claude/CLAUDE.md` missing | Create it with the section as its content |
-| File exists, no pilotfish markers | Append the section at the end (or after the first `#` heading if the file has one — either is fine) |
-| Markers present | Replace everything between and including the markers with the new section (idempotent upgrade) |
+| File missing | Create it with the section as its content |
+| `0` | Append the section at the end (or after the first `#` heading if the file has one — either is fine) |
+| `1` | Replace exactly that one block, from its `<!-- pilotfish:begin -->` through its matching `<!-- pilotfish:end -->` inclusive (idempotent upgrade) |
+| `>1` | **Stop and ask the user** — do not blind-replace; a greedy first-begin-to-last-end replacement could delete user content sitting between two marker pairs |
 
 Do not modify anything outside the markers.
 
@@ -91,4 +99,4 @@ On request, reverse the three targets:
 
 1. Delete the six files from `~/.claude/agents/` (only ones whose content matches pilotfish templates — show a diff first if they were customized).
 2. Remove the block from `<!-- pilotfish:begin -->` through `<!-- pilotfish:end -->` (inclusive) in `~/.claude/CLAUDE.md`; delete the file only if that leaves it empty and the user confirms.
-3. In `~/.claude/settings.json`: offer to restore `model` from the newest backup in `~/.claude/backups/`, and remove `fallbackModel` if the user doesn't want it. Leave `availableModels` additions in place unless asked — they are harmless.
+3. In `~/.claude/settings.json`: restore `model` from the **oldest** `settings.json.pilotfish-*` backup in `~/.claude/backups/` — that file is the pre-install state (Step 3.1 only ever backs up settings once, on first install). If no such backup exists, or the backup has no `model` key, **remove** the `model` key instead of leaving the pilotfish value. Remove `fallbackModel` if the user doesn't want it. Leave `availableModels` additions in place unless asked — they are harmless.

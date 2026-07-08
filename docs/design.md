@@ -10,7 +10,7 @@ The core observation is that "who orchestrates", "who executes what", and "how d
 
 | Layer | File | Changes when | Mechanism |
 |---|---|---|---|
-| Machine | `~/.claude/settings.json` | Your plan/access changes | `model: "best[1m]"` + `fallbackModel` |
+| Machine | `~/.claude/settings.json` | Your plan/access changes | `model: "best"` + `fallbackModel` |
 | Roles | `~/.claude/agents/*.md` | A model tier is re-pointed | One `model:` line of frontmatter per role |
 | Policy | `~/.claude/CLAUDE.md` | Your working style changes | Prose rules written against role names |
 
@@ -44,7 +44,7 @@ The role set is the smallest one that covers the delegation patterns that actual
 | Role | Tier argument |
 |---|---|
 | `scout`, `Explore` | Reconnaissance is the highest-volume, lowest-judgment token sink in a coding session (telemetry showed ~36% of calls were exploration even before deliberate routing). Haiku at low effort is indistinguishable in output quality here. |
-| `mech-executor` | Fully-specified work has its judgment already done — by the orchestrator, in the spec. Sonnet executes specs faithfully, and on subscriptions its consumption lands in the separate Sonnet-only weekly bucket. |
+| `mech-executor` | Fully-specified work has its judgment already done — by the orchestrator, in the spec. Sonnet executes specs faithfully, and on subscriptions it additionally draws on the dedicated Sonnet-only weekly bucket (extra headroom on top of the shared all-models limit). |
 | `executor` | Real implementation needs local design judgment; Opus is the measured sweet spot below the frontier. Notably it beats routing to the frontier even ignoring cost, because routine work doesn't benefit from Fable-tier reasoning. |
 | `verifier` | Official guidance: independent fresh-context verifiers outperform self-critique. It is read-and-run only — a verifier that fixes things stops being independent. |
 | `security-executor` | Two reasons: security work deserves consistently high effort, and the frontier model's safety classifiers can refuse benign defensive-security work mid-task. Pre-routing security to Opus makes the refusal path unreachable instead of handled. |

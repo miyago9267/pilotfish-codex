@@ -32,7 +32,7 @@ The orchestrator/executor split is officially endorsed: Anthropic's Fable 5 prom
 
 Two subscription-specific bonuses stack on top:
 
-> **提示 / Tip:** Claude subscriptions use a two-bucket weekly limit — an "all models" bucket and a **separate Sonnet-only bucket**. Routing execution to Sonnet subagents doesn't just cost less per token; it shifts consumption into a different pool entirely.
+> **提示 / Tip:** Claude subscriptions use a two-bucket weekly limit — a shared "all models" bucket plus an **additional Sonnet-only bucket**. Routing execution to Sonnet subagents costs less per token *and* draws on that extra dedicated headroom. (Sonnet usage still counts against the all-models bucket too — it's additional allowance, not a fully separate pool.)
 
 > ⚠️ **Warning:** Since Claude Code v2.1.198 the built-in `Explore` subagent inherits your main-session model. If your main session runs Fable 5 or Opus, every background search burns frontier-priced tokens. pilotfish overrides it back to Haiku.
 
@@ -42,7 +42,7 @@ Three layers, three files' worth of configuration, all under `~/.claude/`:
 
 | Layer | File(s) | Job |
 |---|---|---|
-| Machine | `~/.claude/settings.json` | Who orchestrates (`best[1m]`) + automatic `fallbackModel` chain |
+| Machine | `~/.claude/settings.json` | Who orchestrates (`best`) + automatic `fallbackModel` chain |
 | Roles | `~/.claude/agents/*.md` | Six role agents, each pinned to the right model tier via one line of frontmatter |
 | Policy | `~/.claude/CLAUDE.md` | *How* to delegate — written in terms of roles, never model names |
 
@@ -95,7 +95,7 @@ Prefer to do it by hand? The same steps are written for humans in [install/AGENT
 
 | Target | Change | Reversible |
 |---|---|---|
-| `~/.claude/settings.json` | `model` → `"best[1m]"`, adds `fallbackModel: ["opus", "sonnet"]`, extends `availableModels` (only if you already restrict it) | Yes — keys are independent |
+| `~/.claude/settings.json` | `model` → `"best"`, adds `fallbackModel: ["opus", "sonnet"]`, extends `availableModels` (only if you already restrict it) | Yes — keys are independent |
 | `~/.claude/agents/` | Six role agent files (listed above) | Yes — delete the files |
 | `~/.claude/CLAUDE.md` | One `## Orchestration` section between `<!-- pilotfish:begin/end -->` markers | Yes — remove the marker block |
 
@@ -123,6 +123,7 @@ The delegation policy in `CLAUDE.md` speaks only of roles (`executor`, `scout`, 
 | I use `availableModels` as an allowlist | Then it must contain every alias the agents use (`opus`, `sonnet`, `haiku`), or those agents silently fall back to inheriting the main-session model. The installer checks this. |
 | Why `effort: low` on the cheap roles? | Effort is the second big quota lever. Fable-5-generation models at low effort routinely match previous-generation `xhigh`; recon and mechanical work don't need deep thinking. |
 | Which effort for the main session? | `high`. Official guidance for Fable 5: `high` for most work, `xhigh` only for the longest-horizon tasks, `max` rarely — diminishing returns. |
+| Do I lose the 1M context window? | No — Fable 5 is 1M by default, so `best` gives you 1M whenever it resolves to Fable 5. If you want *guaranteed* 1M even when `best` would fall back to Opus, set `model` to `"opus[1m]"` instead (the `[1m]` suffix is documented for `sonnet`/`opus`/`opusplan`/full IDs, not for `best`). |
 | Does the orchestrator ever do work itself? | Yes — quick single-file reads, decisions, and anything you explicitly asked *it* to judge. Delegation has overhead; the policy says so. |
 | Subagent quality worries me | That's what `verifier` is for: an independent fresh-context pass that tries to *refute* the work. Official guidance: fresh-context verifiers beat self-critique. Escalation (two strikes → higher tier) handles the rest. |
 
