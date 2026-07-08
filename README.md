@@ -125,6 +125,7 @@ The delegation policy in `CLAUDE.md` speaks only of roles (`executor`, `scout`, 
 | Which effort for the main session? | `high`. Official guidance for Fable 5: `high` for most work, `xhigh` only for the longest-horizon tasks, `max` rarely — diminishing returns. |
 | Do I lose the 1M context window? | No — Fable 5 is 1M by default, so `best` gives you 1M whenever it resolves to Fable 5. If you want *guaranteed* 1M even when `best` would fall back to Opus, set `model` to `"opus[1m]"` instead (the `[1m]` suffix is documented for `sonnet`/`opus`/`opusplan`/full IDs, not for `best`). |
 | Does the orchestrator ever do work itself? | Yes — quick single-file reads, decisions, and anything you explicitly asked *it* to judge. Delegation has overhead; the policy says so. |
+| My project has its own CLAUDE.md — conflict? | No file is ever touched: pilotfish writes only under `~/.claude/`. At runtime Claude Code *stacks* project memory and user memory — both load together, neither overrides the other. If one repo needs different behavior, add a local note there (e.g. "work inline in this repo, don't delegate") — the more specific instruction wins in practice. |
 | Subagent quality worries me | That's what `verifier` is for: an independent fresh-context pass that tries to *refute* the work. Official guidance: fresh-context verifiers beat self-critique. Escalation (two strikes → higher tier) handles the rest. |
 
 ## Research & design
