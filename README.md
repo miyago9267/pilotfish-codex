@@ -15,6 +15,7 @@
 - [Install](#install)
 - [Trust & security](#trust--security)
 - [What gets installed](#what-gets-installed)
+- [Updating](#updating)
 - [The fallback story](#the-fallback-story)
 - [Tuning & FAQ](#tuning--faq)
 - [Research & design](#research--design)
@@ -101,11 +102,11 @@ Prefer to do it by hand? The same steps are written for humans in [install/AGENT
 pilotfish installs by having Claude fetch a runbook and template files from this repo and merge them into your global `~/.claude/` config — including a policy block that then loads into **every future session**. Treat it like any `curl | sh`: trust flows from this repo and your GitHub connection, not from the paste. Before running it:
 
 - **Read the actual bytes that get installed**, not just the runbook: the six files in [templates/agents/](./templates/agents/) and [templates/claude-md.orchestration.md](./templates/claude-md.orchestration.md). Nothing else is written to disk.
-- **Pin to a commit** so what you reviewed is what installs — `main` can change between the moment you read it and the moment Claude fetches it. Replace `main` with a full commit SHA (from the [commits page](https://github.com/Nanako0129/pilotfish/commits/main)):
+- **Pin to a release tag or commit** so what you reviewed is what installs — `main` can change between the moment you read it and the moment Claude fetches it. Replace `main` with a release tag (e.g. `v1.1.0`, see [releases](https://github.com/Nanako0129/pilotfish/releases)) or, for the strictest guarantee, a full commit SHA:
 
 ```text
-Read https://raw.githubusercontent.com/Nanako0129/pilotfish/<COMMIT_SHA>/install/AGENT-INSTALL.md
-and follow it to install pilotfish. Fetch every template from that same <COMMIT_SHA>, never from main.
+Read https://raw.githubusercontent.com/Nanako0129/pilotfish/<TAG_OR_SHA>/install/AGENT-INSTALL.md
+and follow it to install pilotfish. Fetch every template from that same <TAG_OR_SHA>, never from main.
 Show me the full plan of changes and get my approval before writing anything.
 ```
 
@@ -120,6 +121,23 @@ Show me the full plan of changes and get my approval before writing anything.
 | `~/.claude/CLAUDE.md` | One `## Orchestration` section between `<!-- pilotfish:begin/end -->` markers | Yes — remove the marker block |
 
 Nothing is written into any project. That's deliberate — see the design doc.
+
+## Updating
+
+The installer is idempotent, so **re-running the install prompt is the update** — unchanged files are skipped, the policy block is replaced in place, your settings are only touched if keys are missing. For a proper update flow that shows you the changelog first, paste:
+
+```text
+Read https://raw.githubusercontent.com/Nanako0129/pilotfish/main/install/AGENT-INSTALL.md
+and follow its "Updating an existing install" section: detect my installed pilotfish version,
+show me the changelog since then, and upgrade after my approval.
+```
+
+| Want to… | How |
+|---|---|
+| Check what you have installed | `grep -o "pilotfish v[0-9.]*" ~/.claude/CLAUDE.md` — no output with markers present = pre-v1.1.0, update recommended |
+| Get notified of new releases | GitHub → **Watch → Custom → Releases** on this repo |
+| See what changed | [CHANGELOG.md](./CHANGELOG.md) — every release is also a git tag |
+| Stay frozen on a reviewed version | Install pinned to a tag or SHA (see [Trust & security](#trust--security)); pinned installs never move until you re-pin |
 
 ## The fallback story
 

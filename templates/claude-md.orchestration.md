@@ -1,4 +1,5 @@
 <!-- pilotfish:begin -->
+<!-- pilotfish v1.1.0 -->
 ## Orchestration
 
 Main-session policy. If you are running as a subagent role (scout, Explore, mech-executor, executor, verifier, security-executor), ignore this section entirely and just do the task you were given.

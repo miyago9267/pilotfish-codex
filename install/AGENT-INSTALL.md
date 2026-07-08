@@ -18,6 +18,15 @@ Source of truth for the files: the [templates/](../templates/) directory of this
 
 > **Portability:** Prefer your own Read / Write / Edit tools over shell commands for all file operations — they behave identically on macOS, Linux, WSL, and native Windows. The bash snippets below are references, not requirements: on native Windows (PowerShell, no Git Bash) they will not run — create directories and copy backups with your file tools, count markers by reading the file, and if `jq` is unavailable validate JSON by parsing it yourself.
 
+## Updating an existing install
+
+When the user asks to **update** (rather than fresh-install), run this before Step 1:
+
+1. Detect the installed version: search `~/.claude/CLAUDE.md` for `pilotfish v` inside the marker block. A version comment like `<!-- pilotfish v1.1.0 -->` gives the installed version; **markers present but no version comment means a pre-v1.1.0 install** (update recommended).
+2. Fetch the latest version and changelog from the same ref you were invoked from (`VERSION` and `CHANGELOG.md` at the repo root — e.g. `https://raw.githubusercontent.com/Nanako0129/pilotfish/main/VERSION`).
+3. If already up to date, say so and stop. Otherwise show the user the changelog entries between their version and the latest, then proceed with Steps 1–4 below — the install is idempotent, so an update is just a re-run: unchanged files are skipped, the policy block is replaced in place, and settings keys are only touched if missing.
+4. If the user customized any agent file, the Step 3.3 diff will surface it — never overwrite a customization without showing the diff and asking.
+
 ## Step 1 — Preflight (read-only)
 
 Gather the current state before proposing anything:
