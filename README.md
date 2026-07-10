@@ -1,10 +1,10 @@
 # pilotfish-codex
 
-> Codex CLI adaptation of [pilotfish](https://github.com/Nanako0129/pilotfish) — the multi-model orchestration layer originally built for Claude Code.
+> Codex CLI multi-model orchestration, adapted from [pilotfish](https://github.com/Nanako0129/pilotfish).
 
-**pilotfish-codex** brings the same idea to [Codex CLI](https://github.com/openai/codex): your main session plans and reviews on a strong model, while cheaper models handle the volume work through role-based subagents. Quality is protected by fresh-context verification, not by using the strongest model everywhere. Everything installs globally — one setup, every project.
+**pilotfish-codex** is Miyago's Codex CLI port and ongoing maintenance line for pilotfish-style orchestration: your main session plans and reviews on a strong model, while cheaper models handle the volume work through role-based subagents. Quality is protected by fresh-context verification, not by using the strongest model everywhere. Everything installs globally — one setup, every project.
 
-Credit: the architecture, research, and design rationale are by [@Nanako0129](https://github.com/Nanako0129). Read the original [research notes](https://github.com/Nanako0129/pilotfish/blob/main/docs/research.md) and [design doc](https://github.com/Nanako0129/pilotfish/blob/main/docs/design.md) for the full reasoning behind this approach. This fork adapts the concept for Codex CLI's TOML-based agent system.
+Primary credit for the original architecture, research, and design rationale goes to [@Nanako0129](https://github.com/Nanako0129). This project keeps that attribution and maintains the Codex-specific adaptation: TOML role agents, `AGENTS.md` orchestration policy, and an installer for `~/.codex/`.
 
 ## How it works
 
@@ -32,7 +32,7 @@ Three layers, all under `~/.codex/`:
 Paste this into a Codex CLI session:
 
 ```
-Read https://raw.githubusercontent.com/miyago9267/pilotfish/main/install/AGENT-INSTALL.md and follow it to install pilotfish-codex into my global Codex configuration.
+Read https://raw.githubusercontent.com/miyago9267/pilotfish-codex/main/install/AGENT-INSTALL.md and follow it to install pilotfish-codex into my global Codex configuration.
 ```
 
 The agent will read the runbook, show you a plan of every change, and wait for your approval before writing anything. The whole process takes about a minute.
@@ -40,7 +40,7 @@ The agent will read the runbook, show you a plan of every change, and wait for y
 To pin to a specific version (recommended for teams):
 
 ```
-Read https://raw.githubusercontent.com/miyago9267/pilotfish/<commit-sha>/install/AGENT-INSTALL.md and follow it to install pilotfish-codex into my global Codex configuration.
+Read https://raw.githubusercontent.com/miyago9267/pilotfish-codex/<commit-sha>/install/AGENT-INSTALL.md and follow it to install pilotfish-codex into my global Codex configuration.
 ```
 
 ## What gets installed
@@ -57,9 +57,13 @@ Nothing outside `~/.codex/` and your `AGENTS.md` is touched. Backups are created
 
 Re-run the install prompt. The installer detects the version stamp in your `AGENTS.md` markers, shows the changelog delta, and applies changes idempotently — unchanged files are skipped, the policy block is replaced in place.
 
-## Model mapping vs. Claude Code pilotfish
+## Versioning
 
-| Role | Claude Code (pilotfish) | Codex CLI (this fork) |
+pilotfish-codex uses its own semantic versioning. Upstream pilotfish versions are recorded as source attribution or compatibility notes, but they do not determine the pilotfish-codex version number.
+
+## Model Mapping
+
+| Role | Upstream pilotfish tier | pilotfish-codex default |
 |---|---|---|
 | scout / explore | Haiku | gpt-5.6-luna |
 | mech-executor | Sonnet | gpt-5.6-terra |
@@ -84,4 +88,4 @@ Swap model names in the TOML files to match your available models — pilotfish-
 
 ## License
 
-MIT — same as the original pilotfish. See [LICENSE](./LICENSE).
+MIT. Original pilotfish copyright is retained; Codex-specific adaptation copyright is added in [LICENSE](./LICENSE).

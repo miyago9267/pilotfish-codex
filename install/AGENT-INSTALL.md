@@ -12,7 +12,7 @@ pilotfish-codex is a global multi-model orchestration layer for Codex CLI. It to
 | `~/.codex/agents/` | Install six role agent files: `scout.toml`, `explore.toml`, `mech-executor.toml`, `executor.toml`, `verifier.toml`, `security-executor.toml` |
 | `AGENTS.md` | Insert one `### Orchestration` section between `<!-- pilotfish-codex:begin -->` and `<!-- pilotfish-codex:end -->` markers |
 
-Source of truth for the files: the [templates/](../templates/) directory of this repository. If you are running inside a local clone, use those files directly; otherwise fetch each from `https://raw.githubusercontent.com/miyago9267/pilotfish/main/templates/...`.
+Source of truth for the files: the [templates/](../templates/) directory of this repository. If you are running inside a local clone, use those files directly; otherwise fetch each from `https://raw.githubusercontent.com/miyago9267/pilotfish-codex/main/templates/...`.
 
 > **Commit pinning:** If the user's install prompt referenced this runbook at a specific commit SHA instead of `main`, fetch **every template from that same SHA** — never fall back to `main`.
 

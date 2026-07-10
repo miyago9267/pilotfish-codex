@@ -1,5 +1,5 @@
 <!-- pilotfish-codex:begin -->
-<!-- pilotfish-codex v1.0.0 -->
+<!-- pilotfish-codex v1.0.1 -->
 ### Orchestration
 
 Main-session policy. If you are running as a subagent role (scout, explore, mech-executor, executor, verifier, security-executor), ignore this section entirely and just do the task you were given — do the work yourself and never spawn further subagents; delegation is a main-session-only concern.

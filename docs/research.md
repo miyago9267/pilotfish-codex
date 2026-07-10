@@ -1,4 +1,6 @@
-# Fable 5 Multi-Model Orchestration — Research Report
+# Upstream Fable 5 Multi-Model Orchestration Research
+
+> Reference note: this document preserves the upstream research context behind pilotfish. pilotfish-codex keeps this attribution intact and applies the pattern to Codex CLI's agent configuration model.
 
 > 繁體中文原版：[research.zh-TW.md](./research.zh-TW.md)（this is a faithful English translation）
 

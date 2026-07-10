@@ -1,4 +1,6 @@
-# pilotfish — Design Rationale
+# Upstream pilotfish Design Rationale
+
+> Reference note: this document preserves the original pilotfish design rationale by Nanako0129. pilotfish-codex keeps this as upstream context while maintaining the Codex CLI adaptation in `README.md`, `install/AGENT-INSTALL.md`, and `templates/`.
 
 ## Purpose
 
