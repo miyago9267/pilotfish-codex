@@ -1,0 +1,4 @@
+# pilotfish-codex recommended main-session settings
+# Merge these into ~/.codex/config.toml — do not overwrite the whole file.
+model = "gpt-5.6-terra"
+model_reasoning_effort = "medium"
