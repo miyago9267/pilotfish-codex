@@ -10,14 +10,16 @@ CLI enums; reasoning effort is accepted per model catalog at runtime, so the
 set here is the port's supported tiers, not a guarantee for an arbitrary model.
 
 Usage:
-    python3 install/validate_agents.py [<agents-dir> ...]
+    python3 install/validate_agents.py [--config <config.toml>] [<agents-dir> ...]
 
-Defaults to `templates/agents` relative to the repository root. Exits non-zero
-and prints one `file: message` line per problem.
+With no arguments, validates both `templates/config.snippet.toml` and
+`templates/agents`. Exits non-zero and prints one `file: message` line per
+problem. Non-default but supported concurrency values print warnings.
 """
 
 from __future__ import annotations
 
+import argparse
 import sys
 import tomllib
 from pathlib import Path
@@ -45,6 +47,9 @@ REQUIRED_KEYS = {
 SANDBOX_MODES = {"read-only", "workspace-write", "danger-full-access"}
 WEB_SEARCH_MODES = {"disabled", "cached", "indexed", "live", "custom"}
 REASONING_EFFORTS = {"low", "medium", "high", "max"}
+V2_CONCURRENCY_MIN = 1
+V2_CONCURRENCY_MAX = 8
+V2_CONCURRENCY_RECOMMENDED = 4
 
 
 def validate_agent(data: dict) -> list[str]:
@@ -80,6 +85,56 @@ def validate_agent(data: dict) -> list[str]:
     return errors
 
 
+def validate_multi_agent_v2_config(config: dict) -> tuple[list[str], list[str]]:
+    """Validate Pilotfish's temporary MultiAgentV2 adapter contract."""
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    features = config.get("features")
+    if not isinstance(features, dict):
+        return ["features.multi_agent_v2 table is missing"], warnings
+
+    adapter = features.get("multi_agent_v2")
+    if not isinstance(adapter, dict):
+        return ["features.multi_agent_v2 table is missing"], warnings
+
+    if adapter.get("hide_spawn_agent_metadata") is not False:
+        errors.append("hide_spawn_agent_metadata must be false")
+
+    if adapter.get("tool_namespace") != "agents":
+        errors.append("tool_namespace must be 'agents' when spawn metadata is exposed")
+
+    if adapter.get("enabled") is True:
+        errors.append(
+            "enabled must not be forced while legacy agents.max_threads is retained"
+        )
+
+    concurrency = adapter.get("max_concurrent_threads_per_session")
+    if type(concurrency) is not int or not (
+        V2_CONCURRENCY_MIN <= concurrency <= V2_CONCURRENCY_MAX
+    ):
+        errors.append(
+            "concurrency must be an integer from "
+            f"{V2_CONCURRENCY_MIN} to {V2_CONCURRENCY_MAX}"
+        )
+        return errors, warnings
+
+    if concurrency == 1:
+        warnings.append("concurrency 1 disables child delegation")
+    elif concurrency > V2_CONCURRENCY_RECOMMENDED:
+        warnings.append(
+            f"concurrency {concurrency} allows higher cost; recommended value is "
+            f"{V2_CONCURRENCY_RECOMMENDED}"
+        )
+    elif concurrency != V2_CONCURRENCY_RECOMMENDED:
+        warnings.append(
+            f"concurrency {concurrency} is valid; recommended value is "
+            f"{V2_CONCURRENCY_RECOMMENDED}"
+        )
+
+    return errors, warnings
+
+
 def validate_dir(agents_dir: Path) -> list[str]:
     """Validate every `*.toml` in a directory; return `file: message` lines."""
     problems: list[str] = []
@@ -107,15 +162,54 @@ def validate_dir(agents_dir: Path) -> list[str]:
     return problems
 
 
+def validate_config(path: Path) -> tuple[list[str], list[str]]:
+    """Parse and validate one Pilotfish-capable Codex config file."""
+    try:
+        with path.open("rb") as handle:
+            data = tomllib.load(handle)
+    except FileNotFoundError:
+        return [f"{path}: config file not found"], []
+    except tomllib.TOMLDecodeError as exc:
+        return [f"{path}: invalid TOML — {exc}"], []
+
+    errors, warnings = validate_multi_agent_v2_config(data)
+    return (
+        [f"{path}: {message}" for message in errors],
+        [f"{path}: {message}" for message in warnings],
+    )
+
+
 def _default_dir() -> Path:
     return Path(__file__).resolve().parents[1] / "templates" / "agents"
 
 
+def _default_config() -> Path:
+    return Path(__file__).resolve().parents[1] / "templates" / "config.snippet.toml"
+
+
 def main(argv: list[str]) -> int:
-    targets = [Path(arg) for arg in argv] or [_default_dir()]
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", type=Path)
+    parser.add_argument("agents_dirs", nargs="*", type=Path)
+    args = parser.parse_args(argv)
+
+    targets = args.agents_dirs or [_default_dir()]
+    config_path = args.config
+    if config_path is None and not argv:
+        config_path = _default_config()
+
     problems: list[str] = []
+    warnings: list[str] = []
+    if config_path is not None:
+        config_problems, config_warnings = validate_config(config_path)
+        problems.extend(config_problems)
+        warnings.extend(config_warnings)
+
     for target in targets:
         problems.extend(validate_dir(target))
+
+    for line in warnings:
+        print(f"warning: {line}", file=sys.stderr)
 
     if problems:
         for line in problems:
@@ -123,7 +217,7 @@ def main(argv: list[str]) -> int:
         print(f"\n{len(problems)} problem(s) found", file=sys.stderr)
         return 1
 
-    print("all agent TOMLs valid")
+    print("all Pilotfish config and agent TOMLs valid")
     return 0
 
 

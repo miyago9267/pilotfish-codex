@@ -5,6 +5,19 @@ the policy block in `AGENTS.md` (`<!-- pilotfish-codex vX.Y.Z -->`).
 pilotfish-codex uses its own semantic versioning; upstream pilotfish versions
 are noted only as source references.
 
+## v1.2.0 — 2026-07-15
+
+- Add the three-key MultiAgentV2 compatibility adapter so named roles remain
+  selectable outside the reserved collaboration schema.
+- Require typed, bounded `agents.spawn_agent` calls and fail closed instead of
+  retrying an untyped child that can inherit the parent model.
+- Extend static validation to cover adapter shape and concurrency boundaries.
+- Add an opt-in live verifier that correlates one exact parent and child
+  rollout, then proves the child model differs from the parent and matches the
+  installed role TOML.
+- Isolate the temporary transport so stable native `agent_type` support can
+  replace the adapter without changing role TOMLs or semantic policy.
+
 ## v1.1.0 — 2026-07-15
 
 - Establish pilotfish-codex as an independent Codex-native project while

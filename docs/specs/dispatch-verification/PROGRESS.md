@@ -1,36 +1,27 @@
 # PROGRESS — dispatch-verification
 
-## Phase 0 — Verification (done)
+## Reconciliation (done)
 
-- [x] Confirm Codex `multi_agent` mechanism, subagent tooling, and TOML schema
-      match pilotfish templates (Codex CLI 0.144.4).
-- [x] Confirm `codex exec` exposes no `spawn_agent` even with flags forced.
-- [x] Confirm the repository tests cover only template self-consistency, not
-      runtime dispatch.
-- [x] Record findings as this spec.
+- [x] Retire the outdated claim that all `codex exec` sessions lack subagents.
+- [x] Confirm affected MultiAgentV2 headless sessions can spawn through the
+      `agents` compatibility namespace.
+- [x] Replace the proposed app-server spike with `codex exec --json` evidence.
+- [x] Implement exact parent/spawn/child rollout correlation.
+- [x] Add offline fail-closed and path-boundary tests.
+- [x] Record explicit-role mechanism proof separately from task-class judgment.
+- [x] Move implementation and upstream migration ownership to
+      `docs/specs/subagent-issue/`.
 
-## Phase 1 — Gap A: document headless boundary
+## Live result
 
-- [ ] A1 README note
-- [ ] A2 design.md known-boundary + evidence
-- [ ] A3 headless notice (or decision to skip)
+- [x] `ADAPTER_OK` on 2026-07-15: Terra parent
+      `019f6676-164b-7d61-ab96-9e7e3ef316f5` spawned Luna child
+      `019f6676-32d0-7742-ae4d-d3b6c14f7c41` through `scout`.
+- [x] Adapter-free probe safely returned
+      `SKIPPED: native_schema_introspection_unavailable` before quota or
+      spawning on Codex `0.144.4`.
 
-## Phase 2 — Gap B: runtime proof
+## Deferred
 
-- [ ] B1 app-server multi-agent surface spike
-- [ ] B2 single-role (`scout`) e2e with SKIP fallback
-- [ ] B3 all-seven-roles binding e2e
-
-## Phase 3 — Gap B: optional enforcement
-
-- [ ] B4 `SubagentStart` mismatch guard (opt-in)
-- [ ] B5 guard fixture test
-- [ ] B6 enable-the-guard docs
-- [ ] design.md "Deliberately left out" row updated
-
-## Notes
-
-- Baseline plumbing (roles load, schema matches, per-role model binding) is
-  sound and out of scope. This spec only closes the proof + boundary gaps.
-- ADR-2 open risk: app-server JSON-RPC is experimental; e2e must skip cleanly
-  when the surface is absent or changed.
+- [ ] Task-class role-selection evaluation
+- [ ] Stable pre-execution mismatch enforcement hook

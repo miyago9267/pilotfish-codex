@@ -1,37 +1,24 @@
 # TASKS — dispatch-verification
 
-Current batch. Check off per step; keep in sync with `PROGRESS.md`.
+Implementation ownership moved to `docs/specs/subagent-issue/`.
 
-## Gap A — headless boundary explicit
+## Reconciled mechanism proof
 
-- [ ] A1. Add a "Delegation is interactive-only" note to `README.md` (state that
-      `codex exec` has no `spawn_agent`; delegation runs only in interactive /
-      app-server sessions).
-- [ ] A2. Record the headless boundary + the forced-flag evidence in
-      `docs/design.md` under a "Known boundaries" heading.
-- [ ] A3. If a verify/install command surfaces the active surface, emit a
-      one-line notice when running headless. (Skip if no such hook exists —
-      record the decision.)
+- [x] A1. Correct the outdated interactive-only `codex exec` conclusion.
+- [x] A2. Document the MultiAgentV2 adapter and headless proof path in README
+      and design docs.
+- [x] A3. Add explicit static and live verification commands.
+- [x] B1. Use `codex exec --json` rather than an app-server spike.
+- [x] B2. Implement exact parent/spawn/child rollout correlation.
+- [x] B3. Assert installed scout model and effort and require the child model to
+      differ from the parent.
+- [x] B4. Add offline parser and boundary tests with no model calls.
+- [x] B5. Define stable `ADAPTER_OK`, `NATIVE_OK`, `SKIPPED`, and `FAILED`
+      verdicts.
 
-## Gap B — runtime proof + optional enforcement
+## Deferred behavior evaluation
 
-- [ ] B1. Spike: confirm `codex app-server` exposes the multi-agent JSON-RPC
-      surface (`spawn_agent` and a way to read the child's effective
-      model/effort). Record the exact method names and payload shape found.
-- [ ] B2. Write an e2e that spawns one role (`scout`) via app-server and asserts
-      its effective model == `gpt-5.6-luna` and effort == `low`. Must SKIP (not
-      fail) when app-server / multi-agent is unavailable.
-- [ ] B3. Extend the e2e to cover all seven roles' model/effort bindings.
-- [ ] B4. Write an optional `SubagentStart` guard script that compares the
-      spawned role's model/effort against `~/.codex/agents/<role>.toml` and
-      warns/blocks on mismatch. Not part of the default install.
-- [ ] B5. Add a policy test asserting the guard flags a deliberately mismatched
-      role fixture.
-- [ ] B6. Document how to enable the optional guard (README "Tuning" or a new
-      "Enforcement" section).
-
-## Wrap-up
-
-- [ ] Update `PROGRESS.md` phase checkboxes.
-- [ ] `docs/design.md` "Deliberately left out" row for enforcement hooks updated
-      to reference the now-available opt-in guard.
+- [ ] C1. Design a task-class evaluation only if Pilotfish later claims that
+      every orchestrator judgment is mechanically enforced.
+- [ ] C2. Reconsider a hard runtime hook only when Codex exposes a stable event
+      containing the effective child role, model, and effort before execution.

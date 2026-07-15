@@ -1,0 +1,520 @@
+from __future__ import annotations
+
+import json
+import io
+import shutil
+import sys
+import tempfile
+import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "install"))
+
+from verify_dispatch import (  # noqa: E402
+    EvidenceError,
+    RoleBinding,
+    build_codex_command,
+    candidate_day_directories,
+    classify_exec_failure,
+    extract_child_thread_id,
+    inspect_dispatch,
+    locate_rollout,
+    main as verify_main,
+    parse_exec_thread_id,
+    read_role_binding,
+)
+
+
+PARENT_ID = "019f7000-0000-7000-8000-000000000001"
+CHILD_ID = "019f7000-0000-7000-8000-000000000002"
+CALL_ID = "call_model_probe"
+
+
+def parent_events(
+    *,
+    namespace: str = "agents",
+    agent_type: str | None = "scout",
+    fork_turns: str | None = "none",
+    multi_agent_version: str = "v2",
+    parent_model: str = "gpt-5.6-terra",
+) -> list[dict]:
+    arguments: dict[str, str] = {
+        "task_name": "model_probe",
+        "message": "Reply with one line.",
+    }
+    if agent_type is not None:
+        arguments["agent_type"] = agent_type
+    if fork_turns is not None:
+        arguments["fork_turns"] = fork_turns
+
+    return [
+        {"type": "session_meta", "payload": {"id": PARENT_ID}},
+        {
+            "type": "turn_context",
+            "payload": {
+                "model": parent_model,
+                "effort": "low",
+                "multi_agent_version": multi_agent_version,
+            },
+        },
+        {
+            "type": "response_item",
+            "payload": {
+                "type": "function_call",
+                "name": "spawn_agent",
+                "namespace": namespace,
+                "arguments": json.dumps(arguments),
+                "call_id": CALL_ID,
+            },
+        },
+        {
+            "type": "event_msg",
+            "payload": {
+                "type": "sub_agent_activity",
+                "event_id": CALL_ID,
+                "agent_thread_id": CHILD_ID,
+                "agent_path": "/root/model_probe",
+                "kind": "started",
+            },
+        },
+    ]
+
+
+def child_events(
+    *,
+    parent_id: str = PARENT_ID,
+    model: str = "gpt-5.6-luna",
+    effort: str = "low",
+) -> list[dict]:
+    return [
+        {
+            "type": "session_meta",
+            "payload": {"id": CHILD_ID, "parent_thread_id": parent_id},
+        },
+        {
+            "type": "turn_context",
+            "payload": {"model": model, "effort": effort},
+        },
+    ]
+
+
+class DispatchEvidenceTests(unittest.TestCase):
+    binding = RoleBinding(model="gpt-5.6-luna", effort="low")
+
+    def test_adapter_proves_exact_child_uses_a_different_model(self) -> None:
+        verdict = inspect_dispatch(
+            parent_events(),
+            child_events(),
+            expected_role=self.binding,
+            expected_namespace="agents",
+        )
+
+        self.assertEqual(verdict.status, "ADAPTER_OK")
+        self.assertEqual(verdict.reason, "verified_distinct_model")
+        self.assertEqual(verdict.parent_thread_id, PARENT_ID)
+        self.assertEqual(verdict.child_thread_id, CHILD_ID)
+        self.assertEqual(verdict.parent_model, "gpt-5.6-terra")
+        self.assertEqual(verdict.child_model, "gpt-5.6-luna")
+
+    def test_native_namespace_reports_native_ok(self) -> None:
+        unproven = inspect_dispatch(
+            parent_events(namespace="collaboration"),
+            child_events(),
+            expected_role=self.binding,
+            expected_namespace="collaboration",
+        )
+        verdict = inspect_dispatch(
+            parent_events(namespace="collaboration"),
+            child_events(),
+            expected_role=self.binding,
+            expected_namespace="collaboration",
+            adapter_free=True,
+        )
+
+        self.assertEqual(unproven.status, "FAILED")
+        self.assertEqual(unproven.reason, "native_adapter_state_unproven")
+        self.assertEqual(verdict.status, "NATIVE_OK")
+
+    def test_v1_is_skipped_as_adapter_not_exercised(self) -> None:
+        verdict = inspect_dispatch(
+            parent_events(multi_agent_version="v1"),
+            child_events(),
+            expected_role=self.binding,
+            expected_namespace="agents",
+        )
+
+        self.assertEqual(verdict.status, "SKIPPED")
+        self.assertEqual(verdict.reason, "adapter_not_exercised")
+
+    def test_namespace_role_and_context_mismatches_fail_closed(self) -> None:
+        cases = (
+            (parent_events(namespace="collaboration"), "namespace_mismatch"),
+            (parent_events(agent_type=None), "agent_type_mismatch"),
+            (parent_events(fork_turns="all"), "fork_turns_mismatch"),
+        )
+
+        for events, reason in cases:
+            with self.subTest(reason=reason):
+                verdict = inspect_dispatch(
+                    events,
+                    child_events(),
+                    expected_role=self.binding,
+                    expected_namespace="agents",
+                )
+                self.assertEqual(verdict.status, "FAILED")
+                self.assertEqual(verdict.reason, reason)
+
+    def test_missing_ambiguous_or_invalid_spawn_evidence_fails_closed(self) -> None:
+        missing_activity = parent_events()[:-1]
+        duplicate_spawn = parent_events()
+        duplicate_spawn.insert(3, dict(duplicate_spawn[2]))
+        invalid_task = parent_events()
+        invalid_arguments = json.loads(invalid_task[2]["payload"]["arguments"])
+        invalid_arguments["task_name"] = "Bad-Task"
+        invalid_task[2]["payload"]["arguments"] = json.dumps(invalid_arguments)
+        invalid_task[3]["payload"]["agent_path"] = "/root/Bad-Task"
+
+        cases = (
+            (missing_activity, "child_activity_missing"),
+            (duplicate_spawn, "spawn_call_ambiguous"),
+            (invalid_task, "task_name_mismatch"),
+        )
+        for events, reason in cases:
+            with self.subTest(reason=reason):
+                verdict = inspect_dispatch(
+                    events,
+                    child_events(),
+                    expected_role=self.binding,
+                    expected_namespace="agents",
+                )
+                self.assertEqual((verdict.status, verdict.reason), ("FAILED", reason))
+
+    def test_parent_child_and_role_binding_mismatches_fail_closed(self) -> None:
+        cases = (
+            (child_events(parent_id="wrong-parent"), "parent_child_mismatch"),
+            (child_events(model="gpt-5.6-sol"), "child_model_mismatch"),
+            (child_events(effort="medium"), "child_effort_mismatch"),
+        )
+
+        for events, reason in cases:
+            with self.subTest(reason=reason):
+                verdict = inspect_dispatch(
+                    parent_events(),
+                    events,
+                    expected_role=self.binding,
+                    expected_namespace="agents",
+                )
+                self.assertEqual(verdict.status, "FAILED")
+                self.assertEqual(verdict.reason, reason)
+
+    def test_inherited_parent_model_never_passes(self) -> None:
+        inherited = RoleBinding(model="gpt-5.6-terra", effort="low")
+
+        verdict = inspect_dispatch(
+            parent_events(),
+            child_events(model="gpt-5.6-terra"),
+            expected_role=inherited,
+            expected_namespace="agents",
+        )
+
+        self.assertEqual(verdict.status, "FAILED")
+        self.assertEqual(verdict.reason, "inherited_parent_model")
+
+
+class DispatchRolloutLocationTests(unittest.TestCase):
+    def test_exec_thread_id_accepts_current_json_event_shapes(self) -> None:
+        direct = json.dumps({"type": "thread.started", "thread_id": PARENT_ID})
+        nested = json.dumps(
+            {"type": "thread.started", "thread": {"id": PARENT_ID}}
+        )
+
+        self.assertEqual(parse_exec_thread_id(direct), PARENT_ID)
+        self.assertEqual(parse_exec_thread_id(nested), PARENT_ID)
+
+    def test_exec_thread_id_rejects_missing_or_ambiguous_ids(self) -> None:
+        with self.assertRaises(EvidenceError):
+            parse_exec_thread_id(json.dumps({"type": "turn.completed"}))
+
+        duplicate = "\n".join(
+            (
+                json.dumps({"type": "thread.started", "thread_id": PARENT_ID}),
+                json.dumps({"type": "thread.started", "thread_id": CHILD_ID}),
+            )
+        )
+        with self.assertRaises(EvidenceError):
+            parse_exec_thread_id(duplicate)
+
+    def test_rollout_lookup_is_exact_and_rejects_duplicates(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            day = root / "2026" / "07" / "15"
+            day.mkdir(parents=True)
+            expected = day / f"rollout-test-{PARENT_ID}.jsonl"
+            expected.write_text("{}\n", encoding="utf-8")
+
+            self.assertEqual(locate_rollout(root, PARENT_ID, [day]), expected.resolve())
+
+            duplicate_day = root / "2026" / "07" / "16"
+            duplicate_day.mkdir(parents=True)
+            (duplicate_day / f"rollout-duplicate-{PARENT_ID}.jsonl").write_text(
+                "{}\n", encoding="utf-8"
+            )
+
+            with self.assertRaises(EvidenceError):
+                locate_rollout(root, PARENT_ID, [day, duplicate_day])
+
+    def test_rollout_lookup_does_not_fall_back_to_fuzzy_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            day = root / "2026" / "07" / "15"
+            day.mkdir(parents=True)
+            (day / f"prefix-{PARENT_ID}-suffix.jsonl").write_text(
+                "{}\n", encoding="utf-8"
+            )
+
+            with self.assertRaises(EvidenceError):
+                locate_rollout(root, PARENT_ID, [day])
+
+    def test_rollout_lookup_rejects_candidates_outside_the_session_root(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sessions = root / "sessions"
+            sessions.mkdir()
+            outside = root / "outside"
+            outside.mkdir()
+            (outside / f"rollout-test-{PARENT_ID}.jsonl").write_text(
+                "{}\n", encoding="utf-8"
+            )
+
+            with self.assertRaises(EvidenceError):
+                locate_rollout(sessions, PARENT_ID, [outside])
+
+    def test_rollout_lookup_rejects_symlinks_that_escape_the_session_root(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sessions = root / "sessions"
+            day = sessions / "2026" / "07" / "15"
+            day.mkdir(parents=True)
+            outside = root / "outside.jsonl"
+            outside.write_text("{}\n", encoding="utf-8")
+            (day / f"rollout-test-{PARENT_ID}.jsonl").symlink_to(outside)
+
+            with self.assertRaises(EvidenceError):
+                locate_rollout(sessions, PARENT_ID, [day])
+
+    def test_exact_child_id_comes_from_the_correlated_activity(self) -> None:
+        self.assertEqual(extract_child_thread_id(parent_events()), CHILD_ID)
+
+        ambiguous = parent_events() + [parent_events()[-1]]
+        with self.assertRaises(EvidenceError):
+            extract_child_thread_id(ambiguous)
+
+
+class DispatchLiveContractTests(unittest.TestCase):
+    def test_role_binding_reads_only_model_and_effort(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "scout.toml"
+            path.write_text(
+                """
+name = "scout"
+model = "gpt-5.6-luna"
+model_reasoning_effort = "low"
+developer_instructions = "ignored by binding reader"
+""".lstrip(),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                read_role_binding(path),
+                RoleBinding(model="gpt-5.6-luna", effort="low"),
+            )
+
+    def test_role_binding_rejects_missing_or_invalid_values(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "scout.toml"
+            path.write_text('model = "gpt-5.6-luna"\n', encoding="utf-8")
+            with self.assertRaises(EvidenceError):
+                read_role_binding(path)
+
+    def test_adapter_and_native_commands_isolate_the_transport(self) -> None:
+        adapter = build_codex_command(
+            codex_bin="codex",
+            cwd=ROOT,
+            mode="adapter",
+            parent_model="gpt-5.6-terra",
+        )
+        native = build_codex_command(
+            codex_bin="codex",
+            cwd=ROOT,
+            mode="native",
+            parent_model="gpt-5.6-terra",
+        )
+
+        self.assertIn("--json", adapter)
+        self.assertIn("--strict-config", adapter)
+        self.assertNotIn("--ignore-user-config", adapter)
+        self.assertIn("agents.spawn_agent", adapter[-1])
+        self.assertIn("agent_type='scout'", adapter[-1])
+        self.assertIn("fork_turns='none'", adapter[-1])
+
+        self.assertIn("--ignore-user-config", native)
+        self.assertNotIn(
+            "features.multi_agent_v2.hide_spawn_agent_metadata=false",
+            native,
+        )
+        self.assertIn("collaboration.spawn_agent", native[-1])
+        self.assertNotIn("agents.spawn_agent", native[-1])
+
+    def test_native_live_probe_skips_before_quota_without_schema_introspection(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            result = verify_main(
+                [
+                    "--live",
+                    "--yes",
+                    "--mode",
+                    "native",
+                    "--codex-bin",
+                    "must-not-be-called",
+                ]
+            )
+
+        self.assertEqual(result, 2)
+        self.assertIn(
+            "SKIPPED reason=native_schema_introspection_unavailable",
+            stdout.getvalue(),
+        )
+        self.assertNotIn("spends real model quota", stderr.getvalue())
+
+    def test_exec_failures_distinguish_unavailable_prerequisites(self) -> None:
+        auth = classify_exec_failure(stdout="", stderr="Not logged in")
+        model = classify_exec_failure(
+            stdout="",
+            stderr="Requested model is unavailable",
+        )
+        runtime = classify_exec_failure(stdout="", stderr="unexpected failure")
+
+        self.assertEqual(
+            (auth.status, auth.reason),
+            ("SKIPPED", "auth_unavailable"),
+        )
+        self.assertEqual(
+            (model.status, model.reason),
+            ("SKIPPED", "parent_model_unavailable"),
+        )
+        self.assertEqual(
+            (runtime.status, runtime.reason),
+            ("FAILED", "codex_exec_failed"),
+        )
+
+    def test_day_lookup_is_bounded_to_explicit_dates(self) -> None:
+        from datetime import datetime, timezone
+
+        root = Path("/sessions")
+        started = datetime(2026, 7, 15, 23, 59, tzinfo=timezone.utc)
+        ended = datetime(2026, 7, 16, 0, 1, tzinfo=timezone.utc)
+
+        directories = candidate_day_directories(root, started, ended)
+
+        self.assertEqual(
+            directories,
+            [root / "2026" / "07" / "15", root / "2026" / "07" / "16"],
+        )
+
+    def test_live_probe_requires_two_explicit_opt_ins(self) -> None:
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            result = verify_main([])
+        self.assertEqual(result, 2)
+        self.assertIn("SKIPPED reason=live_flag_required", stdout.getvalue())
+
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            result = verify_main(["--live"])
+        self.assertEqual(result, 2)
+        self.assertIn("SKIPPED reason=operator_opt_in_required", stdout.getvalue())
+
+    def test_preflight_rejects_role_drift_before_codex_or_quota(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = Path(directory)
+            agents = codex_home / "agents"
+            agents.mkdir()
+            installed = agents / "scout.toml"
+            shutil.copy2(ROOT / "templates" / "agents" / "scout.toml", installed)
+            content = installed.read_text(encoding="utf-8")
+            installed.write_text(
+                content.replace(
+                    "Report the direct answer",
+                    "Report a direct answer",
+                ),
+                encoding="utf-8",
+            )
+            shutil.copy2(
+                ROOT / "templates" / "config.snippet.toml",
+                codex_home / "config.toml",
+            )
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                result = verify_main(
+                    [
+                        "--live",
+                        "--yes",
+                        "--codex-home",
+                        str(codex_home),
+                        "--codex-bin",
+                        "must-not-be-called",
+                    ]
+                )
+
+        self.assertEqual(result, 1)
+        self.assertIn("FAILED reason=installed_role_drift", stdout.getvalue())
+        self.assertNotIn("spends real model quota", stderr.getvalue())
+
+    def test_concurrency_one_skips_before_codex_or_quota(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = Path(directory)
+            agents = codex_home / "agents"
+            agents.mkdir()
+            shutil.copy2(
+                ROOT / "templates" / "agents" / "scout.toml",
+                agents / "scout.toml",
+            )
+            config = (ROOT / "templates" / "config.snippet.toml").read_text(
+                encoding="utf-8"
+            )
+            (codex_home / "config.toml").write_text(
+                config.replace(
+                    "max_concurrent_threads_per_session = 4",
+                    "max_concurrent_threads_per_session = 1",
+                ),
+                encoding="utf-8",
+            )
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                result = verify_main(
+                    [
+                        "--live",
+                        "--yes",
+                        "--codex-home",
+                        str(codex_home),
+                        "--codex-bin",
+                        "must-not-be-called",
+                    ]
+                )
+
+        self.assertEqual(result, 2)
+        self.assertIn("SKIPPED reason=child_delegation_disabled", stdout.getvalue())
+        self.assertNotIn("spends real model quota", stderr.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()

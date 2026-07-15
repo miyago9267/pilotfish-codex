@@ -1,5 +1,5 @@
 <!-- pilotfish-codex:begin -->
-<!-- pilotfish-codex v1.1.0 -->
+<!-- pilotfish-codex v1.2.0 -->
 <!-- markdownlint-disable-next-line MD041 -->
 ### Orchestration
 
@@ -64,6 +64,30 @@ give the stable implementation contract to `security-executor`.
 Model routing is owned by the named agent definitions. Select the named role
 without replacing its configured model or reasoning effort. Use an ad-hoc model
 override only for a truly ad-hoc agent with no matching role definition.
+
+<!-- pilotfish-codex:spawn-transport:begin -->
+#### Spawn transport — temporary MultiAgentV2 adapter
+
+On affected MultiAgentV2 releases, dispatch named roles through
+`agents.spawn_agent`. This transport paragraph is the only namespace-specific
+part of the policy and can be replaced after adapter-free native role dispatch
+is verified.
+
+Every named-role call must supply all three routing fields:
+
+- `agent_type` selects an installed role TOML;
+- `task_name` matches `[a-z0-9_]+`; and
+- `fork_turns = "none"` is the default.
+
+Use a bounded positive integer string for `fork_turns` only when the brief
+depends on recent turns. Never omit the field or request full history. Keep the
+brief self-contained whenever the default is sufficient.
+
+If the `agents` namespace, `agent_type`, or installed role is unavailable, fail
+closed. Never retry the task with an untyped child because it can inherit the
+orchestrator model. Do not pass model or reasoning-effort overrides for an
+installed named role; its TOML remains authoritative.
+<!-- pilotfish-codex:spawn-transport:end -->
 
 Brief each worker in one shot with the goal, constraints, done criteria,
 relevant paths, rationale, output format, budget, and verification expectation.

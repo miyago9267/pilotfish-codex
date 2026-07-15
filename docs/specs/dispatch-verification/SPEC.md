@@ -1,143 +1,55 @@
-# SPEC — Dispatch Verification & Enforcement
+# SPEC — Dispatch verification and enforcement
 
 - Slug: `dispatch-verification`
-- Status: Draft
+- Status: Reconciled
 - Owner: Miyago
 - Created: 2026-07-15
+- Updated: 2026-07-15
+- Implementation source: `docs/specs/subagent-issue/`
 - Discussion: [#2 — Does role-based model dispatch actually fire?](https://github.com/miyago9267/pilotfish-codex/discussions/2)
-  (community input on the open questions below)
 
-## Context
+## Reconciled outcome
 
-pilotfish-codex claims that a main Codex session routes bounded work to seven
-role-based subagents (`scout`, `plan-verifier`, `security-reviewer`,
-`mech-executor`, `executor`, `verifier`, and `security-executor`), each pinned
-to a model + reasoning effort via `~/.codex/agents/*.toml`. A verification pass
-on Codex CLI `0.144.4` confirmed the **plumbing is real and the schema matches**,
-but surfaced two gaps that mean "effective, role-conforming model dispatch" is
-currently **not guaranteed and not provable**.
+The earlier conclusion that `codex exec` cannot spawn subagents was true for
+the probed legacy surface and is false for an affected MultiAgentV2 turn with
+the compatibility adapter. `codex exec --json` now provides the scriptable E2E
+surface; an app-server spike is unnecessary for mechanism proof.
 
-### What was confirmed (baseline, not in scope to fix)
+`install/verify_dispatch.py --live --yes` proves one exact named-role route:
 
-- `multi_agent` feature flag is `stable = true`.
-- The binary ships real subagent tooling: `spawn_agent`, `close_agent`, `wait`,
-  `interrupt_agent`, `send_input`, `resume_agent`, plus `SubagentStart` /
-  `SubagentStop` hooks.
-- `spawn_agent` accepts `agent_type`, `model`, `reasoning_effort`,
-  `service_tier` overrides. Default: "Spawned agents inherit your current model
-  by default … set `model` only when an explicit override is needed."
-- Codex reads the exact TOML keys pilotfish writes: `model`,
-  `model_reasoning_effort`, `sandbox_mode`, `developer_instructions`, `name` /
-  `nickname_candidates` (binary contains matching keys and the validation string
-  `developer_instructions cannot be blank`).
-- The seven roles, `config.toml` model, and `AGENTS.md` markers are installed.
+1. a Terra/low parent calls typed `agents.spawn_agent` for `scout`;
+2. the parent `sub_agent_activity` event supplies the exact child thread ID;
+3. the child session names the exact parent; and
+4. the child rollout reports the installed Luna/low binding and differs from
+   the parent model.
 
-## The two gaps (in scope)
+The proof is manual and quota-spending. Offline fixtures cover parser,
+correlation, namespace, role, context, model, effort, and path boundaries.
 
-### Gap A — Headless (`codex exec`) exposes no subagents
+## Remaining boundary
 
-`codex exec` provides **no** `spawn_agent` tool. Verified by running `codex exec`
-twice, including with `-c features.multi_agent=true -c
-features.enable_fanout=true` forced — the model still answered "No" when asked
-whether it had `spawn_agent`. Delegation is an **interactive-session-only**
-capability. Any workflow driven through `codex exec` (or an equivalent headless
-path) gets zero delegation: the main model does everything itself and the entire
-role-distribution design is inert.
+The E2E proves that explicit named-role routing works. It does not prove that an
+orchestrator will choose the correct role for every task class. That behavioral
+judgment remains policy-governed and is outside the mechanism verifier.
 
-Impact: silent. Nothing errors. A user automating with `codex exec` believes
-pilotfish is routing work when it is not. The README and docs present delegation
-as the product without stating this boundary.
+An optional `SubagentStart` guard is no longer part of this implementation.
+Rollout evidence can detect a completed mismatch, while the temporary policy
+and runtime verifier fail closed before an untyped fallback. A future hard
+runtime guard requires a separate spec if Codex exposes a stable enforcement
+hook with the effective child binding.
 
-### Gap B — No end-to-end proof that dispatch happens, and no enforcement
+## Decisions
 
-The repository's static tests, `tests/test_policy.py` and
-`tests/test_templates.py`, check **template self-consistency** (filenames match
-`name`, role routing matches the expected model and effort, policy prose
-contains no model names, leaf roles cannot delegate, and the version stamp is
-present). They assert **nothing** about runtime behavior:
-
-- that Codex actually loads the seven roles,
-- that a spawned role runs on its bound model / effort,
-- that the orchestrator delegates according to `AGENTS.md` on a realistic task.
-
-Role-conforming behavior therefore rests entirely on the main model voluntarily
-following `AGENTS.md` prose. `docs/design.md` explicitly records that enforcement
-hooks were "Deliberately left out". There is no `SubagentStart` guard that would
-catch a role spawned on the wrong model, and no eval that a given task class
-triggers the correct role. "Behavior matches role distribution" is currently an
-unverified assumption.
-
-## Goals
-
-1. Make Gap A explicit and non-silent: document the headless boundary and, where
-   feasible, detect or warn.
-2. Provide a runtime proof path for Gap B: an end-to-end check that a spawned
-   role actually runs on its bound model/effort, plus a minimal enforcement
-   option that catches mismatches.
-
-## Non-goals
-
-- Rewriting the role set, models, or policy prose (baseline is sound).
-- Making `codex exec` support subagents (not controllable from this project;
-  it is an upstream Codex capability).
-- Full behavioral eval of orchestrator judgment quality (a later, larger effort;
-  this spec covers only mechanism proof + mismatch enforcement).
-
-## Approaches / ADRs
-
-### ADR-1 — Headless boundary is documented, not worked around
-
-Codex controls whether `exec` exposes subagents; pilotfish cannot add them.
-Decision: treat the boundary as a documented product constraint (README +
-design.md), and — if an install/verify command exists — emit a one-line notice
-when the active surface is headless. Rejected: attempting to shim delegation in
-`exec` (out of our control, would be fragile).
-
-### ADR-2 — E2E proof via `codex app-server`, not the TUI
-
-The TUI cannot be driven headlessly for CI. The interactive multi-agent tools
-are backed by `codex app-server` (JSON-RPC). Decision: build the runtime proof
-against `app-server` so it is scriptable. It spawns each role and asserts the
-subagent's effective model/effort equals the TOML binding. Open risk: app-server
-JSON-RPC surface is experimental and may change; the test must degrade to
-"skipped, unsupported" rather than fail spuriously.
-
-### ADR-3 — Enforcement is an opt-in `SubagentStart` hook, staying policy-first
-
-design.md's "policy-only until discipline slips" stance holds. Decision: ship a
-`SubagentStart` guard as an **optional** add-on (not default install) that
-rejects or warns when a spawned role's model/effort does not match its TOML.
-Keeps the default install policy-only; gives teams who want a hard gate one.
-
-## Open questions (community)
-
-Tracked in discussion [#2](https://github.com/miyago9267/pilotfish-codex/discussions/2);
-answers feed the ADRs and tasks above.
-
-### Gap A
-
-- Q-A1: Is there any supported way to get subagents in a headless/scriptable
-  Codex surface (e.g. `codex app-server` JSON-RPC), or is interactive the only
-  path? (Resolves ADR-1 / ADR-2 and task B1.)
-- Q-A2: Should pilotfish-codex detect the headless surface and emit a one-line
-  "delegation unavailable here" notice, or is docs-only the right call?
-  (Resolves task A3.)
-
-### Gap B
-
-- Q-B1: What is the cleanest scriptable way to assert a spawned role's
-  *effective* model/effort equals its TOML binding? Does `codex app-server`
-  expose the child's resolved model in a way a test can read? (Resolves B2/B3.)
-- Q-B2: Is a `SubagentStart` guard that rejects/warns on model↔role mismatch
-  worth shipping as opt-in, or does it fight Codex's own routing? (Resolves
-  ADR-3 / B4.)
-- Q-B3: Has anyone built an eval that a task *class* triggers the *correct* role
-  (not just that spawning works)? This is the real role-distribution proof and
-  is currently a non-goal here — link prior art if it exists.
+- Use headless `codex exec --json`, not experimental app-server JSON-RPC.
+- Prove the installed `scout` binding first; do not infer all seven roles from
+  one child.
+- Treat feature-list and version output as hints; rollout evidence is
+  authoritative.
+- Return `SKIPPED` for an unexercised or unavailable surface and `FAILED` for a
+  routing mismatch.
+- Keep normal tests offline and bounded to synthetic JSONL evidence.
 
 ## Acceptance
 
-See `TESTS.md`. Summary: docs state the headless boundary; an app-server-based
-e2e proves at least one role binds to its configured model/effort (or cleanly
-skips when unsupported); an optional `SubagentStart` guard flags a deliberately
-mismatched role.
+`TESTS.md` records the reconciled mechanism-proof contract. Broader task-class
+selection evaluation remains a future project.
