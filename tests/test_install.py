@@ -84,6 +84,32 @@ class ConfigMergeTest(unittest.TestCase):
         self.assertIs(config["features"]["js_repl"], False)
         self.assertIn('repaired tool_namespace = "agents"', notes)
 
+    def test_empty_explicit_adapter_table_is_repaired(self) -> None:
+        original = (
+            "[features]\n"
+            "multi_agent = true\n"
+            "\n"
+            "[features.multi_agent_v2]\n"
+        )
+
+        text, _ = merge_config_text(original)
+
+        adapter = tomllib.loads(text)["features"]["multi_agent_v2"]
+        self.assertIs(adapter["hide_spawn_agent_metadata"], False)
+        self.assertEqual(adapter["tool_namespace"], "agents")
+        self.assertEqual(adapter["max_concurrent_threads_per_session"], 4)
+        self.assertEqual(text.count("[features.multi_agent_v2]"), 1)
+
+    def test_partial_inline_adapter_requires_guided_install(self) -> None:
+        original = (
+            "[features]\n"
+            "multi_agent = true\n"
+            "multi_agent_v2 = { hide_spawn_agent_metadata = false }\n"
+        )
+
+        with self.assertRaisesRegex(InstallAbort, "agent-guided install"):
+            merge_config_text(original)
+
     def test_valid_user_concurrency_is_kept(self) -> None:
         original = (
             "[features.multi_agent_v2]\n"
@@ -351,6 +377,32 @@ class EndToEndTempHomeTest(unittest.TestCase):
             backups = list(home.glob("config.toml.pilotfish-codex-*"))
             self.assertEqual(len(backups), 1)
             self.assertEqual(backups[0].read_text(), original)
+
+    def test_config_and_instruction_alias_abort_without_writing(self) -> None:
+        for alias_kind in ("symlink", "hardlink"):
+            with self.subTest(alias_kind=alias_kind):
+                with tempfile.TemporaryDirectory() as tmp:
+                    home = Path(tmp) / "codex-home"
+                    home.mkdir()
+                    config = home / "config.toml"
+                    original = "[features]\nmulti_agent = true\n"
+                    config.write_text(original)
+                    if alias_kind == "symlink":
+                        os.symlink(config, home / "AGENTS.md")
+                    else:
+                        os.link(config, home / "AGENTS.md")
+
+                    with self.assertRaisesRegex(
+                        InstallAbort, "managed paths share one destination"
+                    ):
+                        self._run(home)
+
+                    self.assertEqual(config.read_text(), original)
+                    self.assertEqual((home / "AGENTS.md").read_text(), original)
+                    self.assertFalse((home / "agents").exists())
+                    self.assertEqual(
+                        list(home.glob("*.pilotfish-codex-*")), []
+                    )
 
     def test_write_failure_rolls_back_already_replaced_targets(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -193,6 +193,71 @@ class DispatchEvidenceTests(unittest.TestCase):
                 )
                 self.assertEqual((verdict.status, verdict.reason), ("FAILED", reason))
 
+    def test_missing_or_empty_correlation_ids_fail_closed(self) -> None:
+        for missing_value in (None, ""):
+            events = parent_events()
+            if missing_value is None:
+                events[2]["payload"].pop("call_id")
+                events[3]["payload"].pop("event_id")
+            else:
+                events[2]["payload"]["call_id"] = missing_value
+                events[3]["payload"]["event_id"] = missing_value
+
+            with self.subTest(missing_value=missing_value):
+                verdict = inspect_dispatch(
+                    events,
+                    child_events(),
+                    expected_role=self.binding,
+                    expected_namespace="agents",
+                )
+                self.assertEqual(
+                    (verdict.status, verdict.reason),
+                    ("FAILED", "spawn_call_id_missing"),
+                )
+                with self.assertRaises(EvidenceError):
+                    extract_child_thread_id(events)
+
+    def test_missing_or_mismatched_activity_event_id_fails_closed(self) -> None:
+        for event_id in (None, "", "different-call"):
+            events = parent_events()
+            if event_id is None:
+                events[3]["payload"].pop("event_id")
+            else:
+                events[3]["payload"]["event_id"] = event_id
+
+            with self.subTest(event_id=event_id):
+                verdict = inspect_dispatch(
+                    events,
+                    child_events(),
+                    expected_role=self.binding,
+                    expected_namespace="agents",
+                )
+                self.assertEqual(
+                    (verdict.status, verdict.reason),
+                    ("FAILED", "child_activity_missing"),
+                )
+                with self.assertRaises(EvidenceError):
+                    extract_child_thread_id(events)
+
+    def test_non_object_spawn_arguments_fail_closed(self) -> None:
+        for arguments in ([], "scout", None, 1):
+            events = parent_events()
+            events[2]["payload"]["arguments"] = json.dumps(arguments)
+
+            with self.subTest(arguments=arguments):
+                verdict = inspect_dispatch(
+                    events,
+                    child_events(),
+                    expected_role=self.binding,
+                    expected_namespace="agents",
+                )
+                self.assertEqual(
+                    (verdict.status, verdict.reason),
+                    ("FAILED", "spawn_arguments_invalid"),
+                )
+                with self.assertRaises(EvidenceError):
+                    extract_child_thread_id(events)
+
     def test_parent_child_and_role_binding_mismatches_fail_closed(self) -> None:
         cases = (
             (child_events(parent_id="wrong-parent"), "parent_child_mismatch"),
@@ -210,6 +275,220 @@ class DispatchEvidenceTests(unittest.TestCase):
                 )
                 self.assertEqual(verdict.status, "FAILED")
                 self.assertEqual(verdict.reason, reason)
+
+    def test_conflicting_turn_context_evidence_fails_closed(self) -> None:
+        conflicting_parent = parent_events()
+        conflicting_parent.insert(
+            2,
+            {
+                "type": "turn_context",
+                "payload": {
+                    "model": "gpt-5.6-sol",
+                    "effort": "max",
+                    "multi_agent_version": "v2",
+                },
+            },
+        )
+        conflicting_child = child_events()
+        conflicting_child.append(
+            {
+                "type": "turn_context",
+                "payload": {"model": "gpt-5.6-sol", "effort": "max"},
+            }
+        )
+
+        cases = (
+            (conflicting_parent, child_events(), "parent_context_conflict"),
+            (parent_events(), conflicting_child, "child_context_conflict"),
+        )
+        for parents, children, reason in cases:
+            with self.subTest(reason=reason):
+                verdict = inspect_dispatch(
+                    parents,
+                    children,
+                    expected_role=self.binding,
+                    expected_namespace="agents",
+                )
+                self.assertEqual((verdict.status, verdict.reason), ("FAILED", reason))
+
+    def test_invalid_turn_context_required_fields_fail_closed(self) -> None:
+        parent_cases = (
+            ("model", []),
+            ("effort", None),
+            ("multi_agent_version", 2),
+        )
+        for field, value in parent_cases:
+            events = parent_events()
+            events[1]["payload"][field] = value
+            with self.subTest(side="parent", field=field):
+                verdict = inspect_dispatch(
+                    events,
+                    child_events(),
+                    expected_role=self.binding,
+                    expected_namespace="agents",
+                )
+                self.assertEqual(
+                    (verdict.status, verdict.reason),
+                    ("FAILED", "parent_context_invalid"),
+                )
+
+        for field, value in (("model", []), ("effort", "")):
+            events = child_events()
+            events[1]["payload"][field] = value
+            with self.subTest(side="child", field=field):
+                verdict = inspect_dispatch(
+                    parent_events(),
+                    events,
+                    expected_role=self.binding,
+                    expected_namespace="agents",
+                )
+                self.assertEqual(
+                    (verdict.status, verdict.reason),
+                    ("FAILED", "child_context_invalid"),
+                )
+
+    def test_malformed_turn_context_payload_alongside_valid_evidence_fails_closed(
+        self,
+    ) -> None:
+        for malformed in (
+            {"type": "turn_context"},
+            {"type": "turn_context", "payload": None},
+        ):
+            parents = parent_events() + [malformed]
+            with self.subTest(side="parent", malformed=malformed):
+                verdict = inspect_dispatch(
+                    parents,
+                    child_events(),
+                    expected_role=self.binding,
+                    expected_namespace="agents",
+                )
+                self.assertEqual(
+                    (verdict.status, verdict.reason),
+                    ("FAILED", "parent_context_invalid"),
+                )
+
+            children = child_events() + [malformed]
+            with self.subTest(side="child", malformed=malformed):
+                verdict = inspect_dispatch(
+                    parent_events(),
+                    children,
+                    expected_role=self.binding,
+                    expected_namespace="agents",
+                )
+                self.assertEqual(
+                    (verdict.status, verdict.reason),
+                    ("FAILED", "child_context_invalid"),
+                )
+
+    def test_malformed_relevant_parent_evidence_payload_fails_closed(self) -> None:
+        expected_reasons = {
+            "session_meta": "parent_evidence_invalid",
+            "turn_context": "parent_context_invalid",
+            "response_item": "parent_evidence_invalid",
+            "event_msg": "parent_evidence_invalid",
+        }
+        for event_type, reason in expected_reasons.items():
+            for payload in ("missing", None, []):
+                malformed = {"type": event_type}
+                if payload != "missing":
+                    malformed["payload"] = payload
+                events = parent_events() + [malformed]
+
+                with self.subTest(event_type=event_type, payload=payload):
+                    verdict = inspect_dispatch(
+                        events,
+                        child_events(),
+                        expected_role=self.binding,
+                        expected_namespace="agents",
+                    )
+                    self.assertEqual(
+                        (verdict.status, verdict.reason),
+                        ("FAILED", reason),
+                    )
+
+    def test_malformed_relevant_child_evidence_payload_fails_closed(self) -> None:
+        expected_reasons = {
+            "session_meta": "child_evidence_invalid",
+            "turn_context": "child_context_invalid",
+        }
+        for event_type, reason in expected_reasons.items():
+            for payload in ("missing", None, []):
+                malformed = {"type": event_type}
+                if payload != "missing":
+                    malformed["payload"] = payload
+                events = child_events() + [malformed]
+
+                with self.subTest(event_type=event_type, payload=payload):
+                    verdict = inspect_dispatch(
+                        parent_events(),
+                        events,
+                        expected_role=self.binding,
+                        expected_namespace="agents",
+                    )
+                    self.assertEqual(
+                        (verdict.status, verdict.reason),
+                        ("FAILED", reason),
+                    )
+
+    def test_malformed_relevant_extractor_evidence_raises(self) -> None:
+        for event_type in ("response_item", "event_msg"):
+            for payload in ("missing", None, []):
+                malformed = {"type": event_type}
+                if payload != "missing":
+                    malformed["payload"] = payload
+
+                with self.subTest(event_type=event_type, payload=payload):
+                    with self.assertRaises(EvidenceError):
+                        extract_child_thread_id(parent_events() + [malformed])
+
+    def test_non_evidence_events_do_not_require_payload_objects(self) -> None:
+        extras = [
+            {"type": "unknown"},
+            {"type": "normal", "payload": None},
+            {"type": "diagnostic", "payload": []},
+        ]
+
+        verdict = inspect_dispatch(
+            parent_events() + extras,
+            child_events() + extras,
+            expected_role=self.binding,
+            expected_namespace="agents",
+        )
+
+        self.assertEqual(verdict.status, "ADAPTER_OK")
+        self.assertEqual(extract_child_thread_id(parent_events() + extras), CHILD_ID)
+
+    def test_non_object_outer_evidence_event_fails_closed(self) -> None:
+        malformed = parent_events() + [None]
+
+        verdict = inspect_dispatch(
+            malformed,
+            child_events(),
+            expected_role=self.binding,
+            expected_namespace="agents",
+        )
+
+        self.assertEqual(
+            (verdict.status, verdict.reason),
+            ("FAILED", "parent_evidence_invalid"),
+        )
+        with self.assertRaises(EvidenceError):
+            extract_child_thread_id(malformed)
+
+    def test_duplicate_consistent_turn_context_evidence_is_accepted(self) -> None:
+        parents = parent_events()
+        parents.insert(2, dict(parents[1], payload=dict(parents[1]["payload"])))
+        children = child_events()
+        children.append(dict(children[1], payload=dict(children[1]["payload"])))
+
+        verdict = inspect_dispatch(
+            parents,
+            children,
+            expected_role=self.binding,
+            expected_namespace="agents",
+        )
+
+        self.assertEqual(verdict.status, "ADAPTER_OK")
 
     def test_inherited_parent_model_never_passes(self) -> None:
         inherited = RoleBinding(model="gpt-5.6-terra", effort="low")
@@ -247,6 +526,12 @@ class DispatchRolloutLocationTests(unittest.TestCase):
         )
         with self.assertRaises(EvidenceError):
             parse_exec_thread_id(duplicate)
+
+    def test_exec_thread_id_rejects_non_object_json_events(self) -> None:
+        for event in ([], "thread.started", None, 1):
+            with self.subTest(event=event):
+                with self.assertRaises(EvidenceError):
+                    parse_exec_thread_id(json.dumps(event))
 
     def test_rollout_lookup_is_exact_and_rejects_duplicates(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -289,6 +574,14 @@ class DispatchRolloutLocationTests(unittest.TestCase):
             expected_namespace="agents",
         )
         self.assertEqual(verdict.status, "FAILED")
+
+    def test_rollout_loader_ignores_non_evidence_payload_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            rollout = Path(directory) / "rollout.jsonl"
+            event = {"type": "diagnostic", "payload": ["normal", "data"]}
+            rollout.write_text(json.dumps(event) + "\n", encoding="utf-8")
+
+            self.assertEqual(load_jsonl(rollout), [event])
 
     def test_rollout_lookup_treats_glob_metacharacters_literally(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -24,6 +24,11 @@ from validate_agents import validate_config
 
 TASK_NAME = "model_probe"
 TASK_NAME_RE = re.compile(r"^[a-z0-9_]+$")
+PARENT_EVIDENCE_TYPES = frozenset(
+    {"session_meta", "turn_context", "response_item", "event_msg"}
+)
+CHILD_EVIDENCE_TYPES = frozenset({"session_meta", "turn_context"})
+EXTRACTOR_EVIDENCE_TYPES = frozenset({"response_item", "event_msg"})
 
 
 class EvidenceError(ValueError):
@@ -73,6 +78,20 @@ def _payloads(events: Iterable[dict], item_type: str) -> list[dict]:
     ]
 
 
+def _validate_evidence_events(
+    events: Iterable[dict], relevant_types: frozenset[str]
+) -> None:
+    """Reject malformed evidence while ignoring unrelated event payloads."""
+    for event in events:
+        if not isinstance(event, dict):
+            raise EvidenceError("rollout event is not an object")
+        event_type = event.get("type")
+        if event_type not in relevant_types:
+            continue
+        if not isinstance(event.get("payload"), dict):
+            raise EvidenceError(f"{event_type} payload is not an object")
+
+
 def load_jsonl(path: Path) -> list[dict]:
     """Load a rollout JSONL file and reject malformed or non-object events."""
     events: list[dict] = []
@@ -90,9 +109,10 @@ def load_jsonl(path: Path) -> list[dict]:
             raise EvidenceError(f"{path}:{line_number}: invalid JSON") from exc
         if not isinstance(event, dict):
             raise EvidenceError(f"{path}:{line_number}: event is not an object")
-        payload = event.get("payload")
-        if payload is not None and not isinstance(payload, dict):
-            raise EvidenceError(f"{path}:{line_number}: payload is not an object")
+        try:
+            _validate_evidence_events([event], PARENT_EVIDENCE_TYPES)
+        except EvidenceError as exc:
+            raise EvidenceError(f"{path}:{line_number}: {exc}") from exc
         events.append(event)
 
     if not events:
@@ -110,6 +130,8 @@ def parse_exec_thread_id(output: str) -> str:
             event = json.loads(line)
         except json.JSONDecodeError as exc:
             raise EvidenceError(f"exec output line {line_number} is not JSON") from exc
+        if not isinstance(event, dict):
+            raise EvidenceError(f"exec output line {line_number} is not an object")
         if event.get("type") != "thread.started":
             continue
         thread_id = event.get("thread_id")
@@ -216,19 +238,26 @@ def _spawn_call(parent_events: list[dict]) -> dict:
 
 def extract_child_thread_id(parent_events: list[dict]) -> str:
     """Resolve one child from the exact spawn call/activity correlation."""
+    _validate_evidence_events(parent_events, EXTRACTOR_EVIDENCE_TYPES)
     spawn = _spawn_call(parent_events)
     call_id = spawn.get("call_id")
+    if not isinstance(call_id, str) or not call_id:
+        raise EvidenceError("spawn call has no call ID")
     try:
         arguments = json.loads(spawn.get("arguments", ""))
     except (json.JSONDecodeError, TypeError) as exc:
         raise EvidenceError("spawn arguments are invalid") from exc
+    if not isinstance(arguments, dict):
+        raise EvidenceError("spawn arguments are not an object")
     task_name = arguments.get("task_name")
 
     activities = [
         payload
         for payload in _payloads(parent_events, "event_msg")
         if payload.get("type") == "sub_agent_activity"
-        and payload.get("event_id") == call_id
+        and isinstance(payload.get("event_id"), str)
+        and bool(payload.get("event_id"))
+        and payload["event_id"] == call_id
         and payload.get("kind") == "started"
         and payload.get("agent_path") == f"/root/{task_name}"
     ]
@@ -293,9 +322,29 @@ def _session_id(events: list[dict]) -> tuple[str | None, str | None]:
     )
 
 
-def _turn_context(events: list[dict]) -> dict | None:
-    payloads = _payloads(events, "turn_context")
-    return payloads[0] if payloads else None
+def _turn_context(
+    events: list[dict], *, required_fields: tuple[str, ...]
+) -> dict | None:
+    payloads: list[dict] = []
+    for event in events:
+        if event.get("type") != "turn_context":
+            continue
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            raise EvidenceError("turn context payload is not an object")
+        payloads.append(payload)
+    if not payloads:
+        return None
+
+    evidence: list[tuple[str, ...]] = []
+    for payload in payloads:
+        values = tuple(payload.get(field) for field in required_fields)
+        if any(not isinstance(value, str) or not value for value in values):
+            raise EvidenceError("turn context has invalid required fields")
+        evidence.append(values)
+    if any(values != evidence[0] for values in evidence[1:]):
+        raise EvidenceError("turn context evidence conflicts")
+    return payloads[0]
 
 
 def inspect_dispatch(
@@ -307,8 +356,29 @@ def inspect_dispatch(
     adapter_free: bool = False,
 ) -> Verdict:
     """Return a fail-closed verdict from one exact parent/child rollout pair."""
+    try:
+        _validate_evidence_events(parent_events, PARENT_EVIDENCE_TYPES)
+    except EvidenceError as exc:
+        reason = (
+            "parent_context_invalid"
+            if str(exc).startswith("turn_context ")
+            else "parent_evidence_invalid"
+        )
+        return _verdict("FAILED", reason)
+
     parent_id, _ = _session_id(parent_events)
-    parent_context = _turn_context(parent_events)
+    try:
+        parent_context = _turn_context(
+            parent_events,
+            required_fields=("model", "effort", "multi_agent_version"),
+        )
+    except EvidenceError as exc:
+        reason = (
+            "parent_context_conflict"
+            if "conflicts" in str(exc)
+            else "parent_context_invalid"
+        )
+        return _verdict("FAILED", reason, parent_thread_id=parent_id)
     if parent_id is None or parent_context is None:
         return _verdict("FAILED", "parent_evidence_missing")
 
@@ -356,6 +426,13 @@ def inspect_dispatch(
             parent_thread_id=parent_id,
             parent_model=parent_model,
         )
+    if not isinstance(arguments, dict):
+        return _verdict(
+            "FAILED",
+            "spawn_arguments_invalid",
+            parent_thread_id=parent_id,
+            parent_model=parent_model,
+        )
     if arguments.get("agent_type") != "scout":
         return _verdict(
             "FAILED",
@@ -381,11 +458,20 @@ def inspect_dispatch(
         )
 
     call_id = spawn.get("call_id")
+    if not isinstance(call_id, str) or not call_id:
+        return _verdict(
+            "FAILED",
+            "spawn_call_id_missing",
+            parent_thread_id=parent_id,
+            parent_model=parent_model,
+        )
     activities = [
         payload
         for payload in _payloads(parent_events, "event_msg")
         if payload.get("type") == "sub_agent_activity"
-        and payload.get("event_id") == call_id
+        and isinstance(payload.get("event_id"), str)
+        and bool(payload.get("event_id"))
+        and payload["event_id"] == call_id
         and payload.get("kind") == "started"
         and payload.get("agent_path") == f"/root/{task_name}"
     ]
@@ -406,8 +492,41 @@ def inspect_dispatch(
             parent_model=parent_model,
         )
 
+    try:
+        _validate_evidence_events(child_events, CHILD_EVIDENCE_TYPES)
+    except EvidenceError as exc:
+        reason = (
+            "child_context_invalid"
+            if str(exc).startswith("turn_context ")
+            else "child_evidence_invalid"
+        )
+        return _verdict(
+            "FAILED",
+            reason,
+            parent_thread_id=parent_id,
+            child_thread_id=child_id,
+            parent_model=parent_model,
+        )
+
     child_session_id, child_parent_id = _session_id(child_events)
-    child_context = _turn_context(child_events)
+    try:
+        child_context = _turn_context(
+            child_events,
+            required_fields=("model", "effort"),
+        )
+    except EvidenceError as exc:
+        reason = (
+            "child_context_conflict"
+            if "conflicts" in str(exc)
+            else "child_context_invalid"
+        )
+        return _verdict(
+            "FAILED",
+            reason,
+            parent_thread_id=parent_id,
+            child_thread_id=child_id,
+            parent_model=parent_model,
+        )
     if child_session_id != child_id or child_parent_id != parent_id:
         return _verdict(
             "FAILED",

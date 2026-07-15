@@ -157,8 +157,9 @@ def merge_config_text(text: str) -> tuple[str, list[str]]:
     features = config.get("features", {})
     if not isinstance(features, dict):
         raise InstallAbort("features must be a TOML table")
+    adapter_present = "multi_agent_v2" in features
     adapter = features.get("multi_agent_v2", {})
-    if "multi_agent_v2" in features and not isinstance(adapter, dict):
+    if adapter_present and not isinstance(adapter, dict):
         raise InstallAbort("features.multi_agent_v2 must be a TOML table")
 
     if isinstance(adapter, dict) and adapter.get("enabled") is True:
@@ -190,7 +191,27 @@ def merge_config_text(text: str) -> tuple[str, list[str]]:
         )
         notes.append("set features.multi_agent = true")
 
-    if not isinstance(adapter, dict) or not adapter:
+    concurrency = adapter.get("max_concurrent_threads_per_session")
+    valid_concurrency = (
+        type(concurrency) is int and 1 <= concurrency <= 8
+    )
+    adapter_needs_repair = (
+        adapter.get("hide_spawn_agent_metadata") is not False
+        or adapter.get("tool_namespace") != "agents"
+        or not valid_concurrency
+    )
+    if (
+        adapter_present
+        and adapter_needs_repair
+        and _table_span(lines, "features.multi_agent_v2") is None
+    ):
+        raise InstallAbort(
+            "features.multi_agent_v2 uses inline or dotted TOML syntax that "
+            "the scripted route cannot safely repair; run the agent-guided "
+            "install"
+        )
+
+    if not adapter_present:
         lines = _append_block(lines, ADAPTER_BLOCK.strip().splitlines(), newline)
         notes.append("installed the MultiAgentV2 adapter table")
     else:
@@ -212,8 +233,7 @@ def merge_config_text(text: str) -> tuple[str, list[str]]:
                 newline,
             )
             notes.append('repaired tool_namespace = "agents"')
-        concurrency = adapter.get("max_concurrent_threads_per_session")
-        if type(concurrency) is int and 1 <= concurrency <= 8:
+        if valid_concurrency:
             if concurrency != 4:
                 notes.append(
                     f"kept user concurrency {concurrency} (recommended 4)"
@@ -318,6 +338,26 @@ def _destination(path: Path) -> Path:
     return path
 
 
+def _assert_distinct_managed_paths(paths: list[Path]) -> None:
+    destinations: list[tuple[Path, Path]] = []
+    for path in paths:
+        destination = _destination(path).resolve(strict=False)
+        for other_path, other_destination in destinations:
+            aliases = destination == other_destination
+            if not aliases and path.exists() and other_path.exists():
+                try:
+                    aliases = path.samefile(other_path)
+                except OSError:
+                    aliases = False
+            if aliases:
+                raise InstallAbort(
+                    "managed paths share one destination: "
+                    f"{other_path} and {path}; run the agent-guided install "
+                    "to resolve the collision"
+                )
+        destinations.append((path, destination))
+
+
 def _backup_path(path: Path, stamp: str) -> Path:
     base = path.with_name(f"{path.name}.pilotfish-codex-{stamp}")
     candidate = base
@@ -336,6 +376,7 @@ def _commit_writes(
     Existing symlinks remain symlinks: the replacement is applied to their
     resolved target, while the backup stays beside the configured path.
     """
+    _assert_distinct_managed_paths([path for path, _, _, _ in writes])
     staged: list[tuple[Path, Path, Path, Path | None, bool, str | None]] = []
     try:
         for path, text, default_mode, expected in writes:
@@ -515,6 +556,14 @@ def install(
             )
         )
         changed.append(f"{instruction_path.name}: {action} orchestration block")
+
+    _assert_distinct_managed_paths(
+        [
+            config_path,
+            instruction_path,
+            *(agents_dir / f"{role}.toml" for role in ROLES),
+        ]
+    )
 
     # Validate the exact planned bytes. A validation failure cannot leave a
     # partial install because the commit phase has not started yet.

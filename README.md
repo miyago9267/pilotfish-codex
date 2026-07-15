@@ -229,17 +229,15 @@ depend on the model (luna supports up to `max`, sol supports up to `ultra`).
 
 ## Development
 
-Install the pinned tooling and run the same Markdown check used by CI:
+Run the same checks enforced by CI:
 
 ```bash
 bun install --frozen-lockfile
 bun run lint:md
-```
-
-Policy regression tests use the Python standard library:
-
-```bash
 python3 -m unittest discover -s tests -v
+python3 -m py_compile install/install.py install/validate_agents.py install/verify_dispatch.py
+bash -n install/install.sh
+python3 install/validate_agents.py
 ```
 
 > **Read-only boundary:** `scout`, `plan-verifier`, and `security-reviewer`
