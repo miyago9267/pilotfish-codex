@@ -743,7 +743,12 @@ developer_instructions = "ignored by binding reader"
                 )
 
         self.assertEqual(result, 1)
-        self.assertIn("FAILED reason=role_preflight_failed", stdout.getvalue())
+        self.assertEqual(
+            stdout.getvalue().strip(),
+            "FAILED reason=role_preflight_failed",
+        )
+        self.assertIn("role preflight failed:", stderr.getvalue())
+        self.assertIn("role file not found:", stderr.getvalue())
         self.assertIn("stop named-role dispatch", stderr.getvalue())
         self.assertNotIn("spends real model quota", stderr.getvalue())
 

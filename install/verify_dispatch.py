@@ -648,7 +648,8 @@ def _preflight(
         installed_config = read_role_config(installed_role)
         expected = read_role_binding(template_role)
     except EvidenceError as exc:
-        return None, _verdict("FAILED", f"role_preflight_failed:{exc}")
+        print(f"role preflight failed: {exc}", file=sys.stderr)
+        return None, _verdict("FAILED", "role_preflight_failed")
 
     if installed_config != template_config:
         return None, _verdict("FAILED", "installed_role_drift")
