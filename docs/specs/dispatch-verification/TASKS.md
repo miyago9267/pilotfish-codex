@@ -21,7 +21,7 @@ Current batch. Check off per step; keep in sync with `PROGRESS.md`.
 - [ ] B2. Write an e2e that spawns one role (`scout`) via app-server and asserts
       its effective model == `gpt-5.6-luna` and effort == `low`. Must SKIP (not
       fail) when app-server / multi-agent is unavailable.
-- [ ] B3. Extend the e2e to cover all six roles' model/effort bindings.
+- [ ] B3. Extend the e2e to cover all seven roles' model/effort bindings.
 - [ ] B4. Write an optional `SubagentStart` guard script that compares the
       spawned role's model/effort against `~/.codex/agents/<role>.toml` and
       warns/blocks on mismatch. Not part of the default install.

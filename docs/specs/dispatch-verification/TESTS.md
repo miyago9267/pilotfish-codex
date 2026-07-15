@@ -17,7 +17,7 @@
   `gpt-5.6-luna` and effort is `low`.
 - **AC-B2**: When app-server or the multi-agent surface is unavailable, the e2e
   shall report SKIPPED with the reason, and shall not fail.
-- **AC-B3**: When the full e2e runs, each of the six roles shall be asserted to
+- **AC-B3**: When the full e2e runs, each of the seven roles shall be asserted to
   bind to the model and effort declared in its `~/.codex/agents/<role>.toml`.
 
 ## Gap B — enforcement
@@ -32,5 +32,6 @@
 
 ## Regression
 
-- **AC-R1**: Existing `tests/test_policy.py` assertions shall continue to pass
-  (template self-consistency is unaffected by this work).
+- **AC-R1**: Existing `tests/test_policy.py` and `tests/test_templates.py`
+  assertions shall continue to pass (template self-consistency is unaffected by
+  this work).

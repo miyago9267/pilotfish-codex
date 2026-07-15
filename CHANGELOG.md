@@ -11,9 +11,10 @@ are noted only as source references.
   retaining the original pilotfish attribution and MIT notices.
 - Credit Miyago, OpenAI Codex, and ChatGPT for the Codex adaptation and ongoing
   collaboration.
-- Adapt the upstream pilotfish v1.2.0 dispatch brake and phase-aware lifecycle:
-  delegate only for net benefit, keep tightly coupled diagnosis in the main
-  session, and require stable ownership before writing work begins.
+- Port Pilotfish v1.2's Discovery → Plan → Approval → Execution → Verification
+  lifecycle and dispatch brake to Codex: delegate only for net benefit, keep
+  tightly coupled diagnosis in the main session, require stable ownership
+  before writes, and retain main-session ownership of synthesis and judgment.
 - Remove model names from the installed orchestration policy so routing remains
   owned by the TOML role definitions.
 - Replace detached `nohup` execution with exact-context handoff rules across all
@@ -21,6 +22,31 @@ are noted only as source references.
 - Add pinned project-local Markdown lint tooling and a GitHub Actions job that
   runs the same `bun run lint:md` command.
 - Normalize existing Markdown files to the repository lint rules.
+- Add separate `plan-verifier` and `security-reviewer` roles so Plan readiness,
+  completed-work verification, pre-approval security evidence, and approved
+  security implementation retain distinct capability boundaries.
+- Retire the redundant v1.0.x `explore` role. Pilotfish's uppercase `Explore`
+  exists to shadow Claude Code's built-in agent; Codex needs no such override,
+  and `scout` owns both broad and focused read-only discovery. The installer
+  removes an old `explore.toml` only when it is unmodified or deletion is
+  explicitly approved; an uppercase `Explore.toml` from a pre-release v1.1
+  draft always requires explicit deletion approval. Retired-role drift is
+  checked even when the installed version stamp already matches, and the
+  released lowercase template is bundled as a checksum-pinned retired asset.
+- Use Remora 0.1.10 as the routing reference for the seven shared Codex roles:
+  `scout` on Luna low, `plan-verifier` on Sol medium, `security-reviewer` on Sol
+  high, `mech-executor` on Luna medium, `executor` on Luna max, `verifier` on
+  Sol high, and `security-executor` on Sol max.
+- Set the recommended main model to Sol without changing the user's
+  main-session reasoning effort.
+- Enable native Codex multi-agent support with a three-thread cap and
+  `max_depth = 1`, allowing up to three leaf workers while preventing
+  recursive agent fan-out.
+- Harden installation around active global `AGENTS.override.md` precedence,
+  migration of inactive global or project-root policy blocks, legacy-first
+  pristine backup selection, explicit removal of the v1.0.x-owned reasoning
+  pin, strict config validation, customized-file diffs, and key-level uninstall
+  restoration.
 
 ## v1.0.1 — 2026-07-10
 

@@ -5,7 +5,7 @@
 - [x] Confirm Codex `multi_agent` mechanism, subagent tooling, and TOML schema
       match pilotfish templates (Codex CLI 0.144.4).
 - [x] Confirm `codex exec` exposes no `spawn_agent` even with flags forced.
-- [x] Confirm `tests/test_policy.py` covers only template self-consistency, not
+- [x] Confirm the repository tests cover only template self-consistency, not
       runtime dispatch.
 - [x] Record findings as this spec.
 
@@ -19,7 +19,7 @@
 
 - [ ] B1 app-server multi-agent surface spike
 - [ ] B2 single-role (`scout`) e2e with SKIP fallback
-- [ ] B3 all-six-roles binding e2e
+- [ ] B3 all-seven-roles binding e2e
 
 ## Phase 3 — Gap B: optional enforcement
 

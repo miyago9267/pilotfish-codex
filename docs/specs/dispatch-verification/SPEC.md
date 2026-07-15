@@ -9,13 +9,13 @@
 
 ## Context
 
-pilotfish-codex claims that a main Codex session routes bounded work to six
-role-based subagents (`scout`, `explore`, `mech-executor`, `executor`,
-`verifier`, `security-executor`), each pinned to a model + reasoning effort via
-`~/.codex/agents/*.toml`. A verification pass on Codex CLI `0.144.4` confirmed
-the **plumbing is real and the schema matches**, but surfaced two gaps that mean
-"effective, role-conforming model dispatch" is currently **not guaranteed and
-not provable**.
+pilotfish-codex claims that a main Codex session routes bounded work to seven
+role-based subagents (`scout`, `plan-verifier`, `security-reviewer`,
+`mech-executor`, `executor`, `verifier`, and `security-executor`), each pinned
+to a model + reasoning effort via `~/.codex/agents/*.toml`. A verification pass
+on Codex CLI `0.144.4` confirmed the **plumbing is real and the schema matches**,
+but surfaced two gaps that mean "effective, role-conforming model dispatch" is
+currently **not guaranteed and not provable**.
 
 ### What was confirmed (baseline, not in scope to fix)
 
@@ -30,7 +30,7 @@ not provable**.
   `model_reasoning_effort`, `sandbox_mode`, `developer_instructions`, `name` /
   `nickname_candidates` (binary contains matching keys and the validation string
   `developer_instructions cannot be blank`).
-- The six roles, `config.toml` model, and `AGENTS.md` markers are installed.
+- The seven roles, `config.toml` model, and `AGENTS.md` markers are installed.
 
 ## The two gaps (in scope)
 
@@ -50,12 +50,13 @@ as the product without stating this boundary.
 
 ### Gap B — No end-to-end proof that dispatch happens, and no enforcement
 
-The repository's only test, `tests/test_policy.py`, checks **template
-self-consistency** (filenames match `name`, policy prose contains no model
-names, leaf roles say "Never spawn further subagents", version stamp present).
-It asserts **nothing** about runtime behavior:
+The repository's static tests, `tests/test_policy.py` and
+`tests/test_templates.py`, check **template self-consistency** (filenames match
+`name`, role routing matches the expected model and effort, policy prose
+contains no model names, leaf roles cannot delegate, and the version stamp is
+present). They assert **nothing** about runtime behavior:
 
-- that Codex actually loads the six roles,
+- that Codex actually loads the seven roles,
 - that a spawned role runs on its bound model / effort,
 - that the orchestrator delegates according to `AGENTS.md` on a realistic task.
 

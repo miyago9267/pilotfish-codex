@@ -3,59 +3,86 @@
 <!-- markdownlint-disable-next-line MD041 -->
 ### Orchestration
 
-Main-session policy. If you are running as a subagent role (scout, explore,
-mech-executor, executor, verifier, security-executor), ignore this section
-entirely and just do the task you were given — do the work yourself and never
-spawn further subagents; delegation is a main-session-only concern.
+Main-session policy. If you are running as a subagent role (`scout`,
+`plan-verifier`, `security-reviewer`, `mech-executor`, `executor`, `verifier`,
+or `security-executor`), ignore this section and complete the task yourself
+without further delegation.
 
-You are the orchestrator: keep planning, architecture, ambiguity resolution,
-and final review for yourself; delegate bounded execution to the role agents
-defined in `~/.codex/agents/`. Spend the main session on judgment and use
-verification to protect quality.
+Use the supplied role agents for bounded discovery, execution, and fresh-context
+verification while keeping task framing, Plan synthesis, architecture,
+ambiguity resolution, integration, and final judgment in the main session.
+Complete small, local, already-stable work directly.
 
-Complete small, local, stable work directly. For large, ambiguous, risky, or
-cross-surface work, use a compact lifecycle: bounded read-only discovery,
-main-session plan synthesis, required user approval, execution with stable
-ownership, then fresh-context verification. Do not dispatch a writing agent
-before its scope, constraints, ownership, and done criteria are stable.
+| Role | Boundary |
+|---|---|
+| `scout` | Broad or focused read-only repository reconnaissance |
+| `plan-verifier` | Pre-approval Plan challenge; `READY` or `REVISE` |
+| `security-reviewer` | Pre-approval read-only security evidence |
+| `mech-executor` | Fully specified mechanical implementation |
+| `executor` | Bounded implementation requiring local judgment |
+| `verifier` | Completed-work challenge; `CONFIRMED` or `REFUTED` |
+| `security-executor` | Approved security-sensitive implementation |
 
-| Role | Delegate when |
-| --- | --- |
-| `scout` | Bounded lookup or locating files, symbols, usages, and configuration |
-| `explore` | Broad read-only reconnaissance across many files or conventions |
-| `mech-executor` | Mechanical, fully specified edits, tests, docs, or bulk changes |
-| `executor` | Implementation needing local design judgment |
-| `verifier` | Fresh-context verification of non-trivial completed work |
-| `security-executor` | Security-sensitive analysis or implementation |
+For large, ambiguous, architectural, risky, or explicitly plan-first work, use
+this lifecycle:
 
-Delegation rules:
+| Phase | Gate | Eligible delegation |
+|---|---|---|
+| Discovery | Stabilize the question, allowed scope, evidence format, and stop condition. The final implementation may remain unknown. | Bounded read-only `scout` work on disjoint evidence surfaces. |
+| Plan | The main session synthesizes one Plan containing outcome, non-goals, scope, dependencies, exclusive ownership, sequence, verification, budgets, and stop conditions. | A fresh `plan-verifier` may challenge readiness and return only `READY` or `REVISE`. |
+| Approval | Present the Plan and wait for explicit user approval when the work is large, architectural, risky, or explicitly plan-first. | Read-only clarification only; do not send an implementation brief or edit source before required approval. |
+| Execution | The authorized contract has stable scope, exclusive ownership, constraints, done criteria, integration, and verification. | `mech-executor`, `executor`, or `security-executor`, chosen by the contract and trust boundary. |
+| Verification | The integrated result is concrete enough to refute as a completed-work claim. | A fresh `verifier` returns only `CONFIRMED` or `REFUTED`. |
 
-- Use the smallest useful execution shape: work directly for small or tightly
-  coupled tasks, one worker for a bounded side task, and bounded parallel
-  workers only for independent, low-overlap workstreams.
-- Delegate only when the saved execution or context cost exceeds the briefing,
-  coordination, and review cost.
-- Brief in one shot: goal, constraints, done criteria, relevant paths, why,
-  output format, budget, and verification expectation.
-- Schedule by dependency: if the main session can make useful progress while a
-  worker runs, keep working and collect its result before any dependent step or
-  final answer.
-- Give writing workers exclusive file ownership. When parallel writers are
-  necessary, isolate them in separate worktrees if available; otherwise
-  serialize them or assign disjoint paths.
-- Keep a single unknown bug in the main session when diagnosis, patch design,
-  and live verification share one code path. Use a scout only for a bounded
-  side question that does not own or block the diagnosis.
-- Start with the cheapest role that can plausibly succeed. After two failed
-  attempts, change the task boundary, escalate one tier, or take over.
-- Non-trivial changes get a fresh-context `verifier` pass before you report
-  them done.
-- Scout findings are inputs, not verified outputs: when a decision hinges on a
-  single scouted fact, sanity-check it.
-- Long-running processes belong to the main session. Leaf agents must not
-  detach them; they return the exact command, absolute working directory or
-  worktree, required environment, and input paths so the orchestrator can run
-  and collect the result before resuming the agent.
-- Do not delegate single-file reads needed immediately, final decisions, or
-  tasks whose coordination cost is comparable to doing the work directly.
+Before every agent call, identify the phase and apply a dispatch brake. Do not
+fan out when workers would repeatedly depend on evolving shared evidence, write
+ownership overlaps, no clear synthesis or integration owner exists, or
+coordination cost exceeds the likely benefit. Discovery agents report facts;
+the main session reconciles contradictions and writes the Plan.
+
+Use the smallest useful execution shape: work directly for small or tightly
+coupled tasks, one worker for a bounded side task, and bounded parallel workers
+only for independent, low-overlap workstreams. Delegate only when the saved
+execution or context cost exceeds the briefing, coordination, and review cost.
+A matching role makes work eligible rather than mandatory.
+
+A delegation-planning layer may shape discovery questions, execution topology,
+worker count, ownership, sequence, budgets, and stop conditions. This policy
+remains authoritative for named role semantics, the leaf-agent boundary, the
+approval gate, and verifier contracts; agent TOMLs remain authoritative for
+model and reasoning-effort bindings.
+
+Keep a single unknown bug's initial root-cause discovery, trace-driven
+debugging, tightly coupled state propagation, and the first minimal fix in the
+main session when they share one reasoning chain. Use a scout only for a
+bounded side question whose result does not own or block the main diagnosis.
+
+Route security-sensitive work through separate capability boundaries. Before
+required approval, use `security-reviewer` for evidence only. After approval,
+give the stable implementation contract to `security-executor`.
+
+Model routing is owned by the named agent definitions. Select the named role
+without replacing its configured model or reasoning effort. Use an ad-hoc model
+override only for a truly ad-hoc agent with no matching role definition.
+
+Brief each worker in one shot with the goal, constraints, done criteria,
+relevant paths, rationale, output format, budget, and verification expectation.
+Start with the cheapest eligible role. After two failed attempts, change the
+task boundary, escalate one tier, or take over. Treat scout findings as inputs;
+sanity-check any single fact that carries a decision.
+
+Schedule by data dependency. Start independent agents concurrently when useful,
+give writing agents exclusive file ownership or isolated worktrees, continue
+independent main-session work while they run, and collect every result before
+dependent work or the final answer.
+
+Long-running processes belong to the main session. Leaf agents must not detach
+them; they return the exact command, absolute working directory or worktree,
+required environment, input paths, and completion criterion so the orchestrator
+can run and collect the result before resuming the agent.
+
+Never swap `plan-verifier` and `verifier`. The former challenges Plan
+readiness; the latter reproduces tests and challenges a completed-work claim.
+Neither role writes the Plan or fixes findings. Final judgment remains in the
+main session.
 <!-- pilotfish-codex:end -->

@@ -4,15 +4,31 @@
 > [pilotfish](https://github.com/Nanako0129/pilotfish).
 
 **pilotfish-codex** is an independent Codex CLI adaptation and maintenance line
-for pilotfish-style orchestration. The main session owns planning, architecture,
-and final review while role-based subagents handle bounded volume work. Quality
-comes from clear task contracts and fresh-context verification rather than using
-the strongest model for every step.
+for Pilotfish orchestration, maintained by Miyago. It preserves Pilotfish's
+separation between machine configuration, role bindings, and model-free policy
+while translating the lifecycle and capability boundaries to native Codex
+agents. Quality comes from explicit approval gates and fresh-context
+verification rather than using the strongest model for every step.
 
 The project now evolves on its own release line. Upstream improvements are
 reviewed and selectively adapted when they fit Codex CLI; Codex-specific needs
 take priority over source parity. Everything installs globally: one setup for
 every project.
+
+Primary credit for the original architecture, research, and design rationale
+goes to [@Nanako0129](https://github.com/Nanako0129). This project keeps that
+attribution and maintains the Codex-specific adaptation: TOML role agents, an
+`AGENTS.md` orchestration policy, and an installer for `~/.codex/`. See the
+[Codex design mapping](./docs/design.md) for the adaptation boundary.
+
+v1.1.0 ports Pilotfish v1.2's phase-aware orchestration. Remora 0.1.10 is the
+reference only for the GPT-5.6 model and reasoning-effort bindings shared by
+the seven Codex roles.
+
+> **Codex-specific boundary:** The Claude-only `Explore` override is
+> intentionally not installed. Pilotfish uses that exact name to shadow Claude
+> Code's built-in agent; Codex needs no such compatibility shim, and `scout`
+> already owns both broad and focused read-only discovery.
 
 ## How it works
 
@@ -20,20 +36,21 @@ Three layers, all under `~/.codex/`:
 
 | Layer | File(s) | Job |
 |---|---|---|
-| **Model default** | `config.toml` | Sets the main-session model (e.g. `gpt-5.6-terra`) |
-| **Role agents** | `agents/*.toml` | Six TOML files, each pinning a role to a model + reasoning level |
+| **Model default** | `config.toml` | Sets the main-session model to `gpt-5.6-sol`; main-session effort remains user-controlled |
+| **Role agents** | `agents/*.toml` | Seven TOML files, each owning one role contract, model, and reasoning level |
 | **Delegation policy** | `AGENTS.md` | Tells the orchestrator when to delegate and to whom |
 
-### The six roles
+### The seven Codex roles
 
 | Role | Model | Reasoning | When |
 |---|---|---|---|
-| `scout` | gpt-5.6-luna | low | Search, lookup, "where is X" |
-| `explore` | gpt-5.6-luna | low | Broad codebase sweeps |
-| `mech-executor` | gpt-5.6-terra | low | Mechanical edits, tests, docs |
-| `executor` | gpt-5.6-terra | medium | Features, bug fixes, refactors needing judgment |
-| `verifier` | gpt-5.6-terra | medium | Adversarial verification — read-and-run only |
-| `security-executor` | gpt-5.6-sol | high | Anything security-sensitive |
+| `scout` | gpt-5.6-luna | low | Broad or focused read-only discovery |
+| `plan-verifier` | gpt-5.6-sol | medium | Read-only Plan readiness challenge before approval |
+| `security-reviewer` | gpt-5.6-sol | high | Read-only security evidence before approval |
+| `mech-executor` | gpt-5.6-luna | medium | Mechanical edits, tests, and docs from a complete spec |
+| `executor` | gpt-5.6-luna | max | Features, bug fixes, and refactors needing judgment |
+| `verifier` | gpt-5.6-sol | high | Adversarial completed-work verification |
+| `security-executor` | gpt-5.6-sol | max | Approved security-sensitive implementation |
 
 ### Dispatch principles
 
@@ -49,6 +66,8 @@ Three layers, all under `~/.codex/`:
   blindly. Non-trivial changes receive a fresh-context verifier pass.
 
 ## Install
+
+> Requires Codex CLI 0.144.1 or newer.
 
 Paste this into a Codex CLI session:
 
@@ -69,18 +88,29 @@ Read https://raw.githubusercontent.com/miyago9267/pilotfish-codex/<commit-sha>/i
 
 | Target | Change |
 |---|---|
-| `~/.codex/config.toml` | Optionally set `model` to `gpt-5.6-terra` (asks first if different) |
-| `~/.codex/agents/` | Six TOML agent files |
-| `AGENTS.md` | One `### Orchestration` section between `<!-- pilotfish-codex:begin -->` and `<!-- pilotfish-codex:end -->` markers |
+| `~/.codex/config.toml` | Optionally set `model` to `gpt-5.6-sol`, enable multi-agent support, cap concurrency at three leaf threads, and cap nesting at one leaf generation |
+| `~/.codex/agents/` | Seven TOML agent files |
+| Active `~/.codex/AGENTS.override.md` or `~/.codex/AGENTS.md` | One `### Orchestration` section between `<!-- pilotfish-codex:begin -->` and `<!-- pilotfish-codex:end -->` markers |
 
-Nothing outside `~/.codex/` and your `AGENTS.md` is touched. Backups are created
-before any modification.
+Fresh installs touch only `~/.codex/`. During a v1.0.x upgrade, the installer
+may also remove an obsolete marked Pilotfish block from the current project-root
+`AGENTS.md`, but only after showing that exact migration, receiving approval,
+and backing up the file. Content outside the markers is preserved.
 
 ## Updating
 
-Re-run the install prompt. The installer detects the version stamp in your
-`AGENTS.md` markers, shows the changelog delta, and applies changes idempotently
-— unchanged files are skipped, the policy block is replaced in place.
+Re-run the install prompt. The installer detects the version stamp in the
+active global instruction file, shows the changelog delta, and applies changes
+idempotently — unchanged files are skipped and the policy block is replaced in
+place. Retired discovery files are handled separately: a released v1.0.x
+lowercase `explore.toml` is removed only when unmodified or explicitly
+approved, while an uppercase `Explore.toml` from a pre-release v1.1 draft always
+requires explicit deletion approval. The installer checks this drift even when
+the installed version stamp already equals the current version. v1.0.x upgrades
+also reuse the original `config.toml.pilotfish-*` pristine backup, surface the
+legacy `model_reasoning_effort = "medium"` pin for an explicit migration choice,
+and move stale marked policy blocks from inactive global or project-root files
+into the active global instruction file without touching surrounding content.
 
 ## Versioning
 
@@ -92,10 +122,13 @@ determine the pilotfish-codex version number.
 
 | Role | Upstream pilotfish tier | pilotfish-codex default |
 |---|---|---|
-| scout / explore | Haiku | gpt-5.6-luna |
-| mech-executor | Sonnet | gpt-5.6-terra |
-| executor / verifier | Opus | gpt-5.6-terra |
-| security-executor | Opus (high effort) | gpt-5.6-sol (high reasoning) |
+| `scout` | Haiku | gpt-5.6-luna, low |
+| `plan-verifier` | Opus | gpt-5.6-sol, medium |
+| `security-reviewer` | Opus | gpt-5.6-sol, high |
+| `mech-executor` | Sonnet | gpt-5.6-luna, medium |
+| `executor` | Opus | gpt-5.6-luna, max |
+| `verifier` | Opus | gpt-5.6-sol, high |
+| `security-executor` | Opus (high effort) | gpt-5.6-sol, max |
 
 Swap model names in the TOML files to match your available models —
 pilotfish-codex is just config, not runtime code.
@@ -103,7 +136,7 @@ pilotfish-codex is just config, not runtime code.
 ## Tuning
 
 **Change a role's model:** Edit the `model` field in
-`~/.codex/agents/<role>.toml`, then start a new Codex session so the agent
+`~/.codex/agents/<role>.toml`, then start a fresh Codex session so the agent
 definitions are scanned again.
 
 **Disable a role:** Delete or rename the `.toml` file. The orchestrator falls
@@ -124,15 +157,21 @@ bun run lint:md
 Policy regression tests use the Python standard library:
 
 ```bash
-python3 -m unittest tests/test_policy.py
+python3 -m unittest discover -s tests -v
 ```
+
+> **Read-only boundary:** `scout`, `plan-verifier`, and `security-reviewer`
+> default to `sandbox_mode = "read-only"`. A live
+> parent-session permission override can supersede a custom agent's default, so
+> choose the parent permission mode before delegating pre-approval review.
 
 ## Uninstall
 
-1. Delete the six `.toml` files from `~/.codex/agents/`
+1. Delete the seven `.toml` files from `~/.codex/agents/`
 2. Remove the `<!-- pilotfish-codex:begin -->` through
-   `<!-- pilotfish-codex:end -->` block from `AGENTS.md`
-3. Restore `config.toml` model setting from backup if desired
+   `<!-- pilotfish-codex:end -->` block from the active global instruction file
+3. Restore only the installed `config.toml` keys from the oldest pre-install
+   backup
 
 ## Attribution and contributors
 
