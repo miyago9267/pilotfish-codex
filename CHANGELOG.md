@@ -24,7 +24,8 @@ are noted only as source references.
 - Make the scripted route plan and validate every target before writing,
   preserve CRLF and instruction symlinks, use atomic replacements with
   rollback, refuse unapproved role overwrites or duplicate role names, reject
-  managed-path aliases, and safely repair an empty explicit adapter table.
+  managed-path aliases and non-file symlink targets, and safely repair an empty
+  explicit adapter table.
 - Correct pinned bootstrap syntax so the selected ref reaches `bash`, and keep
   dry runs free of target-directory writes.
 - Fail closed on non-object rollout payloads, match rollout IDs literally, and

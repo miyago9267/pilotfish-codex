@@ -378,6 +378,26 @@ class EndToEndTempHomeTest(unittest.TestCase):
             self.assertEqual(len(backups), 1)
             self.assertEqual(backups[0].read_text(), original)
 
+    def test_managed_symlink_to_non_file_aborts_without_writing(self) -> None:
+        for managed_name in ("config.toml", "AGENTS.md"):
+            with self.subTest(managed_name=managed_name):
+                with tempfile.TemporaryDirectory() as tmp:
+                    home = Path(tmp) / "codex-home"
+                    target = Path(tmp) / "directory-target"
+                    home.mkdir()
+                    target.mkdir()
+                    os.symlink(target, home / managed_name)
+
+                    with self.assertRaisesRegex(
+                        InstallAbort, "does not target a regular file"
+                    ):
+                        self._run(home)
+
+                    self.assertFalse((home / "agents").exists())
+                    self.assertEqual(
+                        list(home.glob("*.pilotfish-codex-*")), []
+                    )
+
     def test_config_and_instruction_alias_abort_without_writing(self) -> None:
         for alias_kind in ("symlink", "hardlink"):
             with self.subTest(alias_kind=alias_kind):

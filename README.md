@@ -117,9 +117,10 @@ the URL.
 | Active `~/.codex/AGENTS.override.md` or `~/.codex/AGENTS.md` | One `### Orchestration` section between `<!-- pilotfish-codex:begin -->` and `<!-- pilotfish-codex:end -->` markers |
 
 Fresh installs target only paths under `~/.codex/`. When one of those paths is
-an existing symlink, the scripted route preserves the symlink and atomically
-updates its resolved target; the timestamped backup remains beside the
-configured path. During a v1.0.x upgrade, the agent-guided installer may also
+an existing symlink to a regular file, the scripted route preserves the
+symlink and atomically updates its resolved target; broken or non-file targets
+abort before writes. The timestamped backup remains beside the configured
+path. During a v1.0.x upgrade, the agent-guided installer may also
 remove an obsolete marked Pilotfish block from the current project-root
 `AGENTS.md`, but only after showing that exact migration, receiving approval,
 and backing up the file. Content outside the markers is preserved.

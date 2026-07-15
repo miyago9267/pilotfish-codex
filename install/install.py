@@ -332,9 +332,15 @@ def _validate_agent_text(path: Path, text: str) -> list[str]:
 def _destination(path: Path) -> Path:
     if path.is_symlink():
         try:
-            return path.resolve(strict=True)
+            destination = path.resolve(strict=True)
         except FileNotFoundError as exc:
             raise InstallAbort(f"refusing to write through broken symlink {path}") from exc
+        if not destination.is_file():
+            raise InstallAbort(
+                f"refusing to write through symlink {path}: it does not target "
+                "a regular file"
+            )
+        return destination
     return path
 
 
