@@ -776,18 +776,22 @@ developer_instructions = "ignored by binding reader"
             ("FAILED", "codex_exec_failed"),
         )
 
-    def test_day_lookup_is_bounded_to_explicit_dates(self) -> None:
+    def test_day_lookup_covers_the_inclusive_bounded_range(self) -> None:
         from datetime import datetime, timezone
 
         root = Path("/sessions")
         started = datetime(2026, 7, 15, 23, 59, tzinfo=timezone.utc)
-        ended = datetime(2026, 7, 16, 0, 1, tzinfo=timezone.utc)
+        ended = datetime(2026, 7, 17, 0, 1, tzinfo=timezone.utc)
 
         directories = candidate_day_directories(root, started, ended)
 
         self.assertEqual(
             directories,
-            [root / "2026" / "07" / "15", root / "2026" / "07" / "16"],
+            [
+                root / "2026" / "07" / "15",
+                root / "2026" / "07" / "16",
+                root / "2026" / "07" / "17",
+            ],
         )
 
     def test_live_probe_requires_two_explicit_opt_ins(self) -> None:

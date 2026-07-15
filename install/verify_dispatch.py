@@ -15,7 +15,7 @@ import subprocess
 import sys
 import tomllib
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -191,7 +191,11 @@ def candidate_day_directories(
     ended_at: datetime,
 ) -> list[Path]:
     """Return unique day directories explicitly crossed by one live probe."""
-    dates = sorted({started_at.date(), ended_at.date()})
+    first_date, last_date = sorted((started_at.date(), ended_at.date()))
+    dates = (
+        first_date + timedelta(days=offset)
+        for offset in range((last_date - first_date).days + 1)
+    )
     return [
         sessions_root / f"{date.year:04d}" / f"{date.month:02d}" / f"{date.day:02d}"
         for date in dates
