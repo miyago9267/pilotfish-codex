@@ -1,160 +1,147 @@
 # pilotfish-codex Design Rationale
 
-> pilotfish-codex is derived from the original pilotfish architecture and
-> research by [Nanako0129](https://github.com/Nanako0129/pilotfish). This
-> document preserves that foundation while recording the independent Codex CLI
-> adaptation maintained by Miyago.
-
-## Codex-specific decisions
-
-- Model and reasoning bindings live only in `templates/agents/*.toml`. The
-  installed `AGENTS.md` policy routes by role so model changes stay local.
-- The main session owns planning, architecture, integration, and final
-  judgment. Delegation must have a clear net benefit after briefing,
-  coordination, and verification costs.
-- Small and tightly coupled tasks stay local. Independent workstreams may use
-  bounded parallelism with explicit ownership and a synthesis owner.
-- Leaf agents never detach long-running commands. They return exact execution
-  context to the main session, which owns task tracking and result collection.
-- Non-trivial work receives fresh-context verification; load-bearing scout
-  findings are sanity-checked separately.
-
-The sections below retain the upstream rationale where it still explains the
-shared architecture. Claude-specific mechanisms are historical source context,
-not Codex CLI installation instructions.
+> pilotfish-codex is an independent Codex CLI adaptation maintained by Miyago.
+> Its architecture and orchestration derive from
+> [Pilotfish](https://github.com/Nanako0129/pilotfish), whose original design and
+> research are credited to Nanako0129. Remora supplies routing data; it is not
+> the architectural source of this port.
 
 ## Purpose
 
-This document explains *why* pilotfish is shaped the way it is: three layers,
-role-based policy, aliases everywhere, effort tiers, and a verification gate.
-The empirical grounding lives in the [research report](./research.md); this is
-the argument from those facts to this design.
+The primary goal is to preserve Pilotfish v1.2's separation of concerns and
+phase-aware orchestration in native Codex configuration. The port keeps
+role-based policy, explicit approval boundaries, leaf workers, and
+fresh-context verification while replacing Claude-specific mechanisms with
+Codex equivalents. The empirical background remains available in the
+[upstream research snapshot](./research.md).
 
-## The three layers
+The project has its own release line. Future Pilotfish changes are reviewed and
+selectively adapted when they improve the Codex design; source parity is not an
+independent goal.
 
-The core observation is that "who orchestrates", "who executes what", and "how
-delegation behaves" change at different rates and should therefore live in
-different places:
+## Three-layer translation
 
-| Layer | File | Changes when | Mechanism |
-|---|---|---|---|
-| Machine | `~/.claude/settings.json` | Your plan/access changes | `model: "best"` + `fallbackModel` |
-| Roles | `~/.claude/agents/*.md` | A model tier is re-pointed | One `model:` line of frontmatter per role |
-| Policy | `~/.claude/CLAUDE.md` | Your working style changes | Prose rules written against role names |
+Pilotfish separates who orchestrates, which role performs eligible work, and
+how delegation behaves because those decisions change at different rates.
+pilotfish-codex maps the same design to three Codex surfaces.
 
-CLAUDE.md cannot set the main-session model (that is a settings/`/model`
-concern), which turns out to be a feature: it forces the clean split where
-settings decide *who* orchestrates and CLAUDE.md decides *how* it delegates.
-
-## Role-based policy, model-free prose
-
-The single most important rule in pilotfish: **the policy text never names a
-model.** It says "delegate mechanical work to `mech-executor`", not "delegate to
-Sonnet". Model bindings exist in exactly one place — the frontmatter of each
-agent file.
-
-This is what makes the fallback story degenerate into no-ops:
+| Layer | Codex surface | Owns |
+|---|---|---|
+| Machine | `~/.codex/config.toml` | Main model, multi-agent enablement, thread cap, and maximum delegation depth |
+| Roles | `~/.codex/agents/*.toml` | Role contract, model, reasoning effort, and sandbox defaults |
+| Policy | Active global `AGENTS.override.md` or `AGENTS.md` | Phase gates, delegation boundaries, approval, integration, and verification rules |
 
 ```mermaid
 flowchart LR
-    P["Policy (CLAUDE.md)<br>roles only"] --> R["Roles (agents/*.md)<br>model: alias"] --> A["Aliases (Claude Code)<br>track recommended versions"] --> M["Models<br>come and go"]
+    CONFIG["Codex config<br>main model and topology"] --> ORCH["Main-session orchestrator"]
+    ORCH --> POLICY["Policy<br>role names and boundaries"]
+    POLICY --> ROLES["Role TOMLs<br>contract and routing"]
+    ROLES --> MODELS["Available Codex models"]
 ```
 
-The June 2026 export-control suspension was a live test of this: accounts on
-aliases degraded gracefully — a notice banner, new sessions continuing on Opus
-— while users who had pinned the full `claude-fable-5` model ID got hard 404
-errors. That is the fallback story working: `best` re-resolves, every role keeps
-its binding, and the policy text is already model-agnostic. The July 2026
-subscription-to-credits boundary is expected to behave the same way per the
-documented resolution rule, though Anthropic has not published the exact
-boundary UX — worst case is one manual `/model` switch or enabling usage
-credits. The same holds for the next deprecation cycle (Opus 4.8 → 4.9, Sonnet 5
-→ next): aliases track the recommended version by design.
+> **Core invariant:** The orchestration policy names roles but never embeds
+> model IDs or reasoning levels. Routing changes in agent TOMLs must not require
+> rewriting the policy.
 
-Three distinct failure modes get three distinct mechanisms — they are often
-conflated but shouldn't be:
+## Seven Codex roles
 
-| Failure | Mechanism | Layer |
+The Codex roster is the smallest non-overlapping projection of the current
+Pilotfish responsibilities.
+
+| Role | Phase | Responsibility | Boundary |
+|---|---|---|---|
+| `scout` | Discovery | Broad or focused repository reconnaissance | Read-only leaf |
+| `plan-verifier` | Plan | Challenge material Plan readiness with `READY` or `REVISE` | Read-only leaf; never rewrites the Plan |
+| `security-reviewer` | Plan / Approval | Gather pre-approval security evidence | Read-only leaf; never implements |
+| `mech-executor` | Execution | Apply a complete mechanical specification | Leaf writer with no delegation |
+| `executor` | Execution | Implement bounded work requiring local judgment | Leaf writer with no delegation |
+| `verifier` | Verification | Challenge completed work with `CONFIRMED` or `REFUTED` | Fresh-context leaf; never fixes findings |
+| `security-executor` | Execution | Implement an approved security-sensitive contract | Leaf writer with no delegation |
+
+Pilotfish's uppercase `Explore` role is deliberately absent. Its exact name
+shadows Claude Code's built-in Explore agent so Claude does not silently inherit
+an expensive main-session model. That compatibility mechanism has no purpose in
+a Codex-only install, where `scout` already covers both broad sweeps and focused
+lookups. Copying both names would create two roles with the same discovery
+boundary.
+
+## Phase-aware orchestration
+
+Role matching makes work eligible for delegation; it does not make delegation
+mandatory. The main session retains framing, Plan synthesis, architecture,
+ambiguity resolution, integration, and final judgment throughout the lifecycle.
+
+| Phase | Stable before delegation | Eligible delegated work |
 |---|---|---|
-| Lost *access* to the frontier model | `best` alias | settings |
-| Model *overloaded / erroring* | `fallbackModel` chain | settings |
-| Model *deprecated* | aliases in role frontmatter | agents |
+| Discovery | Question, allowed scope, evidence format, and stop condition | Independent `scout` contracts on disjoint evidence surfaces |
+| Plan | Outcome, non-goals, dependencies, ownership, sequence, verification, budgets, and stops | Fresh `plan-verifier` challenge |
+| Approval | Material Plan is visible and writes are authorized when required | Read-only clarification or security evidence only |
+| Execution | Scope, exclusive ownership, constraints, done criteria, integration, and verification | `mech-executor`, `executor`, or `security-executor` |
+| Verification | Integrated result is concrete enough to reproduce and refute | Fresh `verifier` challenge |
 
-## Why these six roles
+A delegation-planning layer may choose discovery questions, topology, worker
+count, ownership, sequence, budgets, and stop conditions. Pilotfish policy
+still owns named-role semantics, the leaf boundary, approval, and verifier
+contracts; the role TOMLs own model and effort routing. This composition keeps
+planning strategy replaceable without weakening execution safety.
 
-The role set is the smallest one that covers the delegation patterns that
-actually recur, mapped to the cheapest tier that reliably handles each:
+The dispatch brake keeps small or tightly coupled work in the main session. A
+single unknown bug should not become a sequential `scout` → `executor` pipeline
+when diagnosis, patch design, and live verification share one evolving evidence
+chain. Delegation is valuable when lower model cost, preserved main context,
+parallel elapsed time, isolated ownership, or fresh independence outweigh
+context reconstruction and integration cost.
 
-| Role | Tier argument |
+## Boundaries and routing ownership
+
+The design protects quality by separating questions that should not share an
+author or capability surface.
+
+| Boundary | Design consequence |
 |---|---|
-| `scout`, `Explore` | Reconnaissance is the highest-volume, lowest-judgment token sink in a coding session (telemetry showed ~36% of calls were exploration even before deliberate routing). For *locating* facts — not judging them — Haiku at low effort is effectively equivalent; judgment stays with the orchestrator. Both roles carry a positive `tools: Read, Glob, Grep` allowlist, so "read-only" is enforced, not just prompted. |
-| `mech-executor` | Fully-specified work has its judgment already done — by the orchestrator, in the spec. Sonnet executes specs faithfully, and on subscriptions it additionally draws on the dedicated Sonnet-only weekly bucket (extra headroom on top of the shared all-models limit). |
-| `executor` | Real implementation needs local design judgment; Opus is the measured sweet spot below the frontier. Notably it beats routing to the frontier even ignoring cost, because routine work doesn't benefit from Fable-tier reasoning. |
-| `verifier` | Official guidance: independent fresh-context verifiers outperform self-critique. It is read-and-run only — a verifier that fixes things stops being independent. |
-| `security-executor` | Two reasons: security work deserves consistently high effort, and the frontier model's safety classifiers can refuse benign defensive-security work mid-task. Pre-routing security to Opus makes the refusal path unreachable instead of handled. |
+| Plan readiness vs. completed outcome | `plan-verifier` and `verifier` use different evidence, verdicts, and timing |
+| Security evidence vs. implementation | `security-reviewer` remains read-only before approval; `security-executor` writes only after approval |
+| Main judgment vs. volume work | The main session owns synthesis and integration; workers receive bounded contracts |
+| Parent vs. leaf | `max_depth = 1` and role instructions prevent recursive fan-out |
+| Policy vs. routing | Policy uses role names; each agent TOML is the sole source for its model and effort |
 
-The `Explore` override exists because Claude Code v2.1.198 changed the built-in
-Explore agent to inherit the main-session model — on a frontier main session,
-that silently upgrades your cheapest workload to your most expensive model. A
-same-name user-level agent shadows it.
+Writing agents receive exclusive file ownership or isolated worktrees.
+Long-running commands remain in the main session: leaf agents return the exact
+command and execution context instead of detaching work that can escape task
+tracking.
 
-## Quality: verification over executor pedigree
+## Quality through independent verification
 
-The intuitive objection to cheap executors is quality. pilotfish's answer is
-structural, not hopeful:
+Pilotfish protects output quality structurally:
 
-1. The orchestrator writes complete one-shot specs (goal, constraints,
-   done-criteria, the *why*) — most cheap-model failures are actually spec
-   failures.
-2. Escalation is bounded: two failed attempts on a tier, then escalate or take
-   over. No infinite cheap retries that burn more than they save.
-3. Non-trivial work passes through `verifier` — an adversarial, fresh-context
-   pass that tries to *refute* the claimed outcome before the orchestrator
-   reports it done.
+1. The main session produces a complete contract containing the goal,
+   constraints, done criteria, rationale, paths, ownership, and verification.
+2. Repeated failure changes the boundary: after two attempts, the orchestrator
+   escalates, re-specifies, or takes over instead of retrying indefinitely.
+3. Non-trivial completed work receives a fresh `verifier` pass that attempts to
+   refute the claimed outcome with independently reproduced evidence.
 
-A verifier isn't free — it runs on Opus and re-reads context in a fresh session.
-It's cheaper than generation only because it reads-and-runs rather than
-writes-and-iterates, and because the gate is scoped to *non-trivial* work (small
-changes skip it; the policy says so). What it buys is a change of question: from
-"is the executor smart enough?" to "did the output survive an independent
-refutation attempt?" — a much better question. Two known limits, held honestly:
-same-tier verification catches context-rot and unchecked claims, not
-capability-ceiling errors (Opus won't know what Opus can't know); and the gate
-covers executor output, not scout reconnaissance — which is why the policy
-separately tells the orchestrator to sanity-check load-bearing scouted facts.
-For security-sensitive diffs, the verifier's own prompt escalates it to a
-maximum-thoroughness pass.
+The verifier is intentionally different from the executor. It never fixes a
+finding, and `CONFIRMED` means the completed-work claim survived a fresh
+challenge rather than merely repeating the implementer's test report. Scout
+findings remain discovery evidence; any single fact that carries a decision is
+sanity-checked separately.
 
-## Effort tiers
+## Routing reference
 
-Effort is the second big quota lever after model choice, and the Fable-5
-generation shifted the calculus: low effort on current models routinely matches
-previous-generation `xhigh`. pilotfish therefore pairs every role with an
-effort:
+Remora 0.1.10 is used only to choose the GPT-5.6 model and reasoning-effort
+bindings for the seven shared roles.
 
-| Role class | Effort | Why |
+| Role | Model | Reasoning effort |
 |---|---|---|
-| Recon (`scout`, `Explore`) | `low` | High volume, near-zero judgment |
-| Mechanical (`mech-executor`) | `low` | Judgment lives in the spec |
-| Judgment (`executor`, `verifier`) | `medium` | Balance point |
-| Security (`security-executor`) | `high` | Correctness over cost |
-| Main session | `high` (user setting) | Official Fable 5 guidance: `high` for most work, `xhigh` for the longest horizons only |
+| `scout` | `gpt-5.6-luna` | `low` |
+| `plan-verifier` | `gpt-5.6-sol` | `medium` |
+| `security-reviewer` | `gpt-5.6-sol` | `high` |
+| `mech-executor` | `gpt-5.6-luna` | `medium` |
+| `executor` | `gpt-5.6-luna` | `max` |
+| `verifier` | `gpt-5.6-sol` | `high` |
+| `security-executor` | `gpt-5.6-sol` | `max` |
 
-## Deliberately left out
-
-| Not included | Why |
-|---|---|
-| Per-project configuration | The six projects audited before building this had zero model policy in their CLAUDE.md files — correctly. A single global source of truth is the whole point; project files stay pure technical notes. |
-| Enforcement hooks (spawn guards, stop guards à la fable5-orchestrator) | Powerful but heavy; policy-only works well before adding machinery. If discipline slips, hooks are the documented next step — see the research report. |
-| `CLAUDE_CODE_SUBAGENT_MODEL` | It overrides every per-agent frontmatter globally, which is precisely the opposite of tiered routing. The installer warns if it's set. |
-| Pinned model IDs | Pinning trades resilience for reproducibility; for a personal global config, resilience wins. Organizations that need pinning have `ANTHROPIC_DEFAULT_*_MODEL`. |
-| An `opusplan` default | It's a great quota-saver but changes interactive feel (model switches mid-conversation). Offered as an opt-in in the FAQ instead. |
-
-## Prompting style inside the agents
-
-The agent system prompts follow the Fable-5-generation guidance from the
-research: goals and constraints instead of step-by-step scaffolding, an explicit
-statement of what *not* to do (no scope creep, verifier never fixes),
-evidence-audited progress claims, and "a precise *blocked because X* is a
-successful outcome" to prevent guessing. When editing the templates, keep that
-register — prescriptive checklists measurably degrade current-generation output.
+The recommended main model is Sol, but the installer leaves the user's
+main-session reasoning effort unchanged. This keeps Pilotfish's architecture
+stable while allowing the routing table to evolve independently.
