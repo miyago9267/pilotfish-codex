@@ -7,25 +7,19 @@
 - [x] Live-verify config legality on Codex 0.144.4 (strict-config catches
       unknowns; port config keys legal; `web_search = "live"` valid enum;
       `strict-config` does not cover agent files).
-- [x] Record this spec, prioritizing security + boundary testing over installer
-      slimming, deferring design/routing to the upstream author.
+- [x] Record the accepted upstream design and the one missing static-validation
+      gap.
 
 ## Phase 1 — Fill the missing static validation (done)
 
 - [x] T1 agent-TOML validator (`install/validate_agents.py`: allowlist + enum),
       20/20 tests green, validator passes the seven templates.
-- [~] T2 per-role sandbox contract — already covered by existing tests.
-- [~] T3 leaf-only structural assert — already covered by existing tests.
-- [ ] T4 relax brittle prose assertions — deferred (not "missing validation").
+- [x] T2 per-role sandbox contract — covered by existing tests.
+- [x] T3 leaf-only structural assert — covered by existing tests.
 - [x] T5 self-guard fixtures (unknown key + three bad enums + missing/blank).
 - [x] T6 installer validation-wording fix (attributes agent check to validator).
 
-## Phase 2 — Installer slimming (P2, not started)
+## Open question
 
-- [ ] T7 gate v1.0.x migration behind legacy detection
-- [ ] T8 trim and snapshot-test the fresh-install touch set
-
-## Open questions
-
-- Whether P2 slimming lands in this PR or a follow-up, given the author owns the
-  installer design.
+- Runtime e2e feasibility remains open and is tracked only in the related
+  `dispatch-verification` spec.

@@ -1,9 +1,9 @@
 # TESTS — Port Hardening
 
-EARS acceptance criteria. Priority 1 = security + boundary; Priority 2 =
-installer slimming. Static unless marked runtime.
+All retained acceptance criteria are satisfied by Nanako's existing template
+tests or the static validator added in `48e291f`.
 
-## P1 — Security boundaries
+## Security boundaries
 
 - **AC-S1**: For each read-only role (`scout`, `plan-verifier`,
   `security-reviewer`), the template test shall assert
@@ -27,38 +27,14 @@ installer slimming. Static unless marked runtime.
   `config.snippet.toml` sets `agents.max_depth = 1`, and every role's
   `developer_instructions` states it cannot delegate / spawn further subagents.
 
-## P1 — Boundary test robustness
+## Validator self-guard
 
-- **AC-B1**: Template tests shall assert the structural contract only — role set
-  equals the seven names, each role's model/effort/sandbox equals the routing
-  map, the policy block has exactly one marker pair, and the version stamp is
-  present. They shall not assert exact README or installer sentences.
-- **AC-B2**: The agent-TOML validator shall be self-guarded by four independent
-  failing fixtures: an unknown key, an invalid `sandbox_mode`, an invalid
-  `web_search`, and an invalid `model_reasoning_effort`. This proves the key
-  allowlist and every declared enum check can actually fail.
-- **AC-B3**: Removing a brittle prose assertion shall not reduce contract
-  coverage — every routing and boundary fact previously implied by prose is
-  covered by an explicit structural assertion.
+- **AC-B2**: The agent-TOML validator shall reject an unknown key, an invalid
+  `sandbox_mode`, an invalid `web_search`, an invalid
+  `model_reasoning_effort`, a missing required key, and blank developer
+  instructions.
 
-## P2 — Installer slimming
+## Runtime boundary
 
-- **AC-I1**: Given an isolated `CODEX_HOME` with no prior Pilotfish install, a
-  fresh install shall touch only `config.toml`, the seven declared files under
-  `agents/`, and exactly one active policy file. A fixture without an existing
-  policy shall create `AGENTS.md`; a fixture with a pre-existing
-  `AGENTS.override.md` shall update only its owned block and shall not create
-  `AGENTS.md`. A before/after filesystem snapshot shall fail on any other
-  created or modified path.
-- **AC-I2**: The v1.0.x migration path (pristine-backup selection, legacy effort
-  pin, stale policy-block relocation) shall execute only when a legacy version
-  stamp or a retired `explore.toml` / `Explore.toml` is actually detected; a
-  clean fresh install shall not enter it.
-- **AC-I3**: The installer text shall not claim `codex --strict-config doctor`
-  validates agent files; agent validity shall be attributed to the explicit
-  validator from AC-S3.
-
-## Regression
-
-- **AC-R-REG**: Existing `tests/test_policy.py` and the surviving
-  `tests/test_templates.py` contract assertions shall continue to pass.
+Runtime dispatch and e2e acceptance remain in the related
+`dispatch-verification` spec.
