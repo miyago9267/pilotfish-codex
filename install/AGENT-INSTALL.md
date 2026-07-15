@@ -247,10 +247,19 @@ Run structural and runtime-aware checks:
 codex --strict-config doctor --summary
 ```
 
-Then parse `~/.codex/config.toml` and all seven agent TOMLs with a TOML parser.
-Verify the exact name, model, effort, and sandbox defaults from the routing
-table. Confirm `agents.max_threads = 3` and `agents.max_depth = 1`. Confirm the
-active global instruction file has exactly one marker pair and no inactive
+`codex --strict-config doctor` validates `config.toml` only; it never loads
+`agents/*.toml`. Validate the installed roles with the dedicated static
+validator, which rejects unknown keys and out-of-enum `sandbox_mode`,
+`web_search`, and `model_reasoning_effort` values:
+
+```bash
+python3 install/validate_agents.py ~/.codex/agents
+```
+
+Then confirm the exact name, model, effort, and sandbox defaults match the
+routing table. Confirm `agents.max_threads = 3` and `agents.max_depth = 1`.
+Confirm the active global instruction file has exactly one marker pair and no
+inactive
 global or current project-root candidate retains one. Read back the version
 stamp. Confirm neither retired discovery filename remains when the approved
 outcome is the canonical seven-role roster. If the user chose to preserve

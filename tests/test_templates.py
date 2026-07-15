@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import sys
 import tomllib
 import unittest
 from pathlib import Path
@@ -9,6 +10,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 AGENTS_DIR = ROOT / "templates" / "agents"
+sys.path.insert(0, str(ROOT / "install"))
+
+from validate_agents import validate_agent, validate_dir  # noqa: E402
 ROUTING = {
     "scout": ("gpt-5.6-luna", "low", "read-only"),
     "plan-verifier": ("gpt-5.6-sol", "medium", "read-only"),
@@ -179,6 +183,55 @@ class TemplateContractTests(unittest.TestCase):
         self.assertIn("Pilotfish's uppercase `Explore` role is deliberately absent", design)
         self.assertIn("policy names roles but never embeds", design)
         self.assertIn("delegation-planning layer", design)
+
+
+class AgentStaticValidationTests(unittest.TestCase):
+    """Close the gap `codex --strict-config doctor` leaves: it validates
+    config.toml only, never agents/*.toml. Unknown keys and out-of-enum values
+    must fail before a role reaches a live session."""
+
+    VALID = {
+        "name": "scout",
+        "description": "read-only reconnaissance",
+        "model": "gpt-5.6-luna",
+        "model_reasoning_effort": "low",
+        "sandbox_mode": "read-only",
+        "developer_instructions": "You are a scout.",
+    }
+
+    def test_all_templates_pass_the_validator(self) -> None:
+        self.assertEqual(validate_dir(AGENTS_DIR), [])
+
+    def test_unknown_key_fails(self) -> None:
+        agent = dict(self.VALID, sandbox_moed="read-only")
+        errors = validate_agent(agent)
+        self.assertTrue(any("unknown key" in e for e in errors))
+
+    def test_missing_required_key_fails(self) -> None:
+        agent = dict(self.VALID)
+        del agent["model"]
+        errors = validate_agent(agent)
+        self.assertTrue(any("missing required" in e for e in errors))
+
+    def test_bad_sandbox_enum_fails(self) -> None:
+        agent = dict(self.VALID, sandbox_mode="read_only")
+        errors = validate_agent(agent)
+        self.assertTrue(any("sandbox_mode" in e for e in errors))
+
+    def test_bad_web_search_enum_fails(self) -> None:
+        agent = dict(self.VALID, web_search="on")
+        errors = validate_agent(agent)
+        self.assertTrue(any("web_search" in e for e in errors))
+
+    def test_bad_reasoning_effort_fails(self) -> None:
+        agent = dict(self.VALID, model_reasoning_effort="maxx")
+        errors = validate_agent(agent)
+        self.assertTrue(any("model_reasoning_effort" in e for e in errors))
+
+    def test_blank_developer_instructions_fails(self) -> None:
+        agent = dict(self.VALID, developer_instructions="   ")
+        errors = validate_agent(agent)
+        self.assertTrue(any("cannot be blank" in e for e in errors))
 
 
 if __name__ == "__main__":
