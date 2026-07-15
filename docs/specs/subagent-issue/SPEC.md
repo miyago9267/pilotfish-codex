@@ -107,9 +107,10 @@ currently:
 5. The affected-release adapter shall use `agents.spawn_agent`. Namespace-
    specific policy shall be isolated so native migration changes one transport
    section rather than the routing architecture.
-6. The default fork shall be `"none"`. A positive integer string is permitted
-   only when the brief requires recent turns. Implicit and full-history forks
-   shall not be used for routed workers.
+6. The default fork shall be `"none"`. Only positive integer strings from
+   `"1"` through `"3"` are permitted when the brief requires recent turns.
+   Implicit, larger, and full-history forks shall not be used for routed
+   workers.
 7. If the namespace, `agent_type`, role file, or child routing cannot be
    verified, delegation shall fail closed. It shall never retry as an untyped
    child.

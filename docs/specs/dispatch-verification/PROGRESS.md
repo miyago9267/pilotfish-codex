@@ -14,9 +14,9 @@
 
 ## Live result
 
-- [x] `ADAPTER_OK` on 2026-07-15: Terra parent
-      `019f6676-164b-7d61-ab96-9e7e3ef316f5` spawned Luna child
-      `019f6676-32d0-7742-ae4d-d3b6c14f7c41` through `scout`.
+- [x] `ADAPTER_OK` on 2026-07-16: Terra parent
+      `019f66b4-20c3-7930-8263-102ad9b09b8f` spawned Luna child
+      `019f66b4-3437-7642-aa8e-f11311e53187` through `scout`.
 - [x] Adapter-free probe safely returned
       `SKIPPED: native_schema_introspection_unavailable` before quota or
       spawning on Codex `0.144.4`.

@@ -21,6 +21,13 @@ are noted only as source references.
   one-line curl install with a byte-preserving config merge, timestamped
   backups, idempotent re-runs, and exit-2 aborts on states that need the
   agent-guided runbook's human decisions.
+- Make the scripted route plan and validate every target before writing,
+  preserve CRLF and instruction symlinks, use atomic replacements with
+  rollback, and refuse unapproved role overwrites or duplicate role names.
+- Correct pinned bootstrap syntax so the selected ref reaches `bash`, and keep
+  dry runs free of target-directory writes.
+- Fail closed on non-object rollout payloads, match rollout IDs literally, and
+  print a cost-safety warning for every `FAILED` routing verdict.
 
 ## v1.1.0 — 2026-07-15
 

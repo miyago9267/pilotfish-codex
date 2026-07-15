@@ -477,6 +477,12 @@ def inspect_dispatch(
 
 
 def _print_verdict(verdict: Verdict) -> None:
+    if verdict.status == "FAILED":
+        print(
+            "warning: routing verification failed; stop named-role dispatch "
+            "to avoid unintended parent-model cost",
+            file=sys.stderr,
+        )
     fields = [verdict.status, f"reason={verdict.reason}"]
     for name in (
         "parent_thread_id",

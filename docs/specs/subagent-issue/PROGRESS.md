@@ -53,10 +53,13 @@
 
 ## Final verification
 
-- [x] V1 targeted tests: 50 passing
+- [x] V1 targeted tests: 83 passing
 - [x] V2 Markdown, compile, static validator, strict doctor, and diff checks
 - [x] V3 live smoke with operator opt-in
 - [x] V4 final progress and changelog
+- [x] V5 Copilot findings reproduced and fixed with regression coverage
+- [x] V6 scripted installer reviewed, hardened, and exercised against temp and
+      real Codex homes
 
 ## Decisions
 
@@ -67,6 +70,8 @@
 - Runtime support is capability-driven: `adapter-required`, `native-ready`,
   `unsupported`, or `not-exercised`.
 - Native delegation fails closed when typed role routing cannot be proven.
+- Routed workers default to `fork_turns = "none"`; exceptional recent-context
+  forks are limited to integer strings from `"1"` through `"3"`.
 - Normal tests remain offline; live smoke is explicit and quota-spending.
 - Native migration changes the adapter and transport section, not role routing.
 - An external scheduler remains a separate contingency, not current scope.
@@ -74,19 +79,20 @@
 ## Current gate
 
 Status is Complete. The final requirement-by-requirement audit passed on
-2026-07-15.
+2026-07-16 after installer adversarial review and a fresh live smoke.
 
 ## Live evidence
 
 - `ADAPTER_OK` on Codex `0.144.4`: Terra parent
-  `019f6676-164b-7d61-ab96-9e7e3ef316f5` spawned exact Luna child
-  `019f6676-32d0-7742-ae4d-d3b6c14f7c41` through `scout`.
+  `019f66b4-20c3-7930-8263-102ad9b09b8f` spawned exact Luna child
+  `019f66b4-3437-7642-aa8e-f11311e53187` through `scout`.
 - Adapter-free native probe returned
   `SKIPPED: native_schema_introspection_unavailable` before quota or spawning;
   the temporary adapter remains required.
-- Global config static validation and `codex --strict-config doctor --summary`
-  passed after adding explicit concurrency 4. The rollback backup is
-  `~/.codex/backups/config.toml.before-pilotfish-codex-v1.2-e2e-20260715`.
-- Installed `scout.toml` now matches the repository template in full; its
-  rollback backup is
-  `~/.codex/backups/scout.toml.before-pilotfish-codex-v1.2-e2e-20260715`.
+- Real installation preserved the existing config and seven role TOMLs byte
+  for byte, updated the symlinked policy target atomically, kept the symlink,
+  and created
+  `~/.codex/AGENTS.md.pilotfish-codex-20260716-005455-901821`.
+- The installed tree passed static validation and
+  `codex --strict-config doctor --summary`; a second real install produced an
+  identical nine-file SHA-256 manifest.

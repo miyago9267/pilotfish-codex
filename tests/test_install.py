@@ -5,11 +5,14 @@ user `~/.codex` access."""
 
 from __future__ import annotations
 
+import os
+import shutil
 import sys
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "install"))
@@ -134,6 +137,24 @@ class ConfigMergeTest(unittest.TestCase):
         with self.assertRaises(InstallAbort):
             merge_config_text("model = \n")
 
+    def test_non_table_managed_sections_abort(self) -> None:
+        for original in ("features = 1\n", "agents = false\n"):
+            with self.subTest(original=original):
+                with self.assertRaises(InstallAbort):
+                    merge_config_text(original)
+
+    def test_crlf_survives_a_real_merge_byte_for_byte(self) -> None:
+        original = (
+            "# keep CRLF\r\n"
+            '[mcp_servers.example]\r\ncommand = "tool"  # keep me\r\n'
+        )
+        text, _ = merge_config_text(original)
+        self.assertIn(
+            '[mcp_servers.example]\r\ncommand = "tool"  # keep me\r\n', text
+        )
+        self.assertNotIn("\n", text.replace("\r\n", ""))
+        self.assertEqual(tomllib.loads(text)["features"]["multi_agent"], True)
+
 
 class InstructionMergeTest(unittest.TestCase):
     def test_appends_block_to_fresh_file(self) -> None:
@@ -199,22 +220,161 @@ class EndToEndTempHomeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / "codex-home"
             self.assertEqual(self._run(home, dry_run=True), 0)
+            self.assertFalse(home.exists())
             self.assertFalse((home / "config.toml").exists())
             self.assertFalse((home / "agents").exists())
             self.assertFalse((home / "AGENTS.md").exists())
 
-    def test_drifted_role_is_updated_with_backup(self) -> None:
+    def test_customized_role_aborts_without_writing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / "codex-home"
             agents = home / "agents"
             agents.mkdir(parents=True)
-            (agents / "scout.toml").write_text('name = "scout"\n')
-            self.assertEqual(self._run(home), 0)
-            backups = list(agents.glob("scout.toml.pilotfish-codex-*"))
-            self.assertEqual(len(backups), 1)
-            self.assertIn(
-                "gpt-5.6-luna", (agents / "scout.toml").read_text()
+            custom = 'name = "scout"\n# customized locally\n'
+            (agents / "scout.toml").write_text(custom)
+
+            with self.assertRaises(InstallAbort):
+                self._run(home)
+
+            self.assertEqual((agents / "scout.toml").read_text(), custom)
+            self.assertFalse((home / "config.toml").exists())
+            self.assertFalse((home / "AGENTS.md").exists())
+            self.assertEqual(list(agents.glob("*.pilotfish-codex-*")), [])
+
+    def test_late_marker_abort_leaves_every_target_untouched(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "codex-home"
+            home.mkdir(parents=True)
+            original_config = "[features]\nmulti_agent = true\n"
+            original_agents = "<!-- pilotfish-codex:begin -->\n"
+            (home / "config.toml").write_text(original_config)
+            (home / "AGENTS.md").write_text(original_agents)
+
+            with self.assertRaises(InstallAbort):
+                self._run(home)
+
+            self.assertEqual((home / "config.toml").read_text(), original_config)
+            self.assertEqual((home / "AGENTS.md").read_text(), original_agents)
+            self.assertFalse((home / "agents").exists())
+            self.assertEqual(list(home.glob("*.pilotfish-codex-*")), [])
+
+    def test_invalid_existing_agent_fails_validation_before_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "codex-home"
+            agents = home / "agents"
+            agents.mkdir(parents=True)
+            invalid = 'name = "other"\n'
+            (agents / "other.toml").write_text(invalid)
+
+            self.assertEqual(self._run(home), 1)
+
+            self.assertEqual((agents / "other.toml").read_text(), invalid)
+            self.assertFalse((home / "config.toml").exists())
+            self.assertFalse((home / "AGENTS.md").exists())
+            self.assertEqual(sorted(p.name for p in agents.iterdir()), ["other.toml"])
+
+    def test_missing_template_fails_before_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "source"
+            shutil.copytree(REPO_ROOT / "templates", root / "templates")
+            (root / "templates" / "agents" / "executor.toml").unlink()
+            home = Path(tmp) / "codex-home"
+
+            self.assertEqual(
+                install(
+                    source_root=root,
+                    codex_home=home,
+                    dry_run=False,
+                    check_codex=False,
+                ),
+                1,
             )
+
+            self.assertFalse(home.exists())
+
+    def test_duplicate_role_name_aborts_without_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "codex-home"
+            agents = home / "agents"
+            agents.mkdir(parents=True)
+            duplicate = (REPO_ROOT / "templates" / "agents" / "scout.toml").read_text()
+            (agents / "duplicate.toml").write_text(duplicate)
+
+            with self.assertRaises(InstallAbort):
+                self._run(home)
+
+            self.assertFalse((home / "config.toml").exists())
+            self.assertEqual(sorted(p.name for p in agents.iterdir()), ["duplicate.toml"])
+
+    def test_instruction_symlink_and_target_mode_are_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "codex-home"
+            target = root / "managed" / "AGENTS.md"
+            target.parent.mkdir(parents=True)
+            target.write_text("# managed rules\n")
+            target.chmod(0o640)
+            home.mkdir()
+            os.symlink(target, home / "AGENTS.md")
+
+            self.assertEqual(self._run(home), 0)
+
+            self.assertTrue((home / "AGENTS.md").is_symlink())
+            self.assertIn("### Orchestration", target.read_text())
+            self.assertEqual(target.stat().st_mode & 0o777, 0o640)
+            backups = list(home.glob("AGENTS.md.pilotfish-codex-*"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_text(), "# managed rules\n")
+
+    def test_config_symlink_and_target_mode_are_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "codex-home"
+            target = root / "managed" / "config.toml"
+            target.parent.mkdir(parents=True)
+            original = "[features]\nmulti_agent = true\n"
+            target.write_text(original)
+            target.chmod(0o600)
+            home.mkdir()
+            os.symlink(target, home / "config.toml")
+
+            self.assertEqual(self._run(home), 0)
+
+            self.assertTrue((home / "config.toml").is_symlink())
+            self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(
+                tomllib.loads(target.read_text())["features"]["multi_agent_v2"][
+                    "tool_namespace"
+                ],
+                "agents",
+            )
+            backups = list(home.glob("config.toml.pilotfish-codex-*"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_text(), original)
+
+    def test_write_failure_rolls_back_already_replaced_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "codex-home"
+            home.mkdir()
+            original_config = "[features]\nmulti_agent = true\n"
+            (home / "config.toml").write_text(original_config)
+            real_replace = os.replace
+            calls = 0
+
+            def fail_second_replace(source: str | Path, target: str | Path) -> None:
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise OSError("simulated replacement failure")
+                real_replace(source, target)
+
+            with mock.patch("install.os.replace", side_effect=fail_second_replace):
+                with self.assertRaises(OSError):
+                    self._run(home)
+
+            self.assertEqual((home / "config.toml").read_text(), original_config)
+            self.assertEqual(len(list(home.glob("config.toml.pilotfish-codex-*"))), 1)
+            self.assertEqual(list((home / "agents").glob("*.toml")), [])
 
     def test_config_backup_created_before_rewrite(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -259,6 +419,13 @@ class VersionParseTest(unittest.TestCase):
     def test_parses_and_rejects(self) -> None:
         self.assertEqual(parse_codex_version("codex-cli 0.144.4"), (0, 144, 4))
         self.assertIsNone(parse_codex_version("garbage"))
+
+
+class BootstrapDocumentationTest(unittest.TestCase):
+    def test_pinned_pipeline_sets_ref_on_bash_process(self) -> None:
+        expected = "| PILOTFISH_REF=<tag-or-sha> bash"
+        self.assertIn(expected, (REPO_ROOT / "README.md").read_text())
+        self.assertIn(expected, (REPO_ROOT / "install" / "install.sh").read_text())
 
 
 if __name__ == "__main__":

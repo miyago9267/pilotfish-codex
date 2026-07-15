@@ -22,9 +22,9 @@
   `agents.spawn_agent` with `agent_type`, `task_name`, and `fork_turns`.
 - **AC-P2**: When no recent context is required, the call shall use
   `fork_turns = "none"` and a self-contained brief.
-- **AC-P3**: When recent context is required, `fork_turns` shall be a bounded
-  positive integer string. Omitted, `all`, and implicit full-history forks
-  shall fail policy validation.
+- **AC-P3**: When recent context is required, `fork_turns` shall be a positive
+  integer string from `"1"` through `"3"`. Omitted, larger, `all`, and implicit
+  full-history forks shall fail policy validation.
 - **AC-P4**: When `agent_type` or the typed spawn surface is unavailable, the
   orchestrator shall stop delegation for that task and shall not retry an
   untyped child.

@@ -63,7 +63,7 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("`task_name`", policy)
         self.assertIn("`[a-z0-9_]+`", policy)
         self.assertIn('`fork_turns = "none"`', policy)
-        self.assertIn("bounded positive integer string", policy)
+        self.assertIn('positive integer string from `"1"` through `"3"`', policy)
         self.assertIn("Never retry the task with an untyped child", policy)
         self.assertRegex(policy, r"fail\s+closed")
         self.assertNotIn('fork_turns = "all"', policy)

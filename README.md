@@ -86,12 +86,12 @@ Non-interactive and idempotent: it merges only the managed keys into
 for byte), installs the seven role TOMLs, and replaces the marked
 orchestration block. Preview with `... | bash -s -- --dry-run`. Anything that
 needs a human decision (an explicit `multi_agent = false`, a forced
-`multi_agent_v2.enabled = true`, unmatched markers) aborts without writing —
-use Route 2 for those. Pin a version by replacing `main` in the URL and
-setting the same ref in `PILOTFISH_REF`:
+`multi_agent_v2.enabled = true`, unmatched markers, or a differing existing
+role TOML) aborts without writing — use Route 2 for those. Pin a version by
+replacing `main` in the URL and setting the same ref on the `bash` process:
 
 ```bash
-PILOTFISH_REF=<tag-or-sha> curl -fsSL https://raw.githubusercontent.com/miyago9267/pilotfish-codex/<tag-or-sha>/install/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/miyago9267/pilotfish-codex/<tag-or-sha>/install/install.sh | PILOTFISH_REF=<tag-or-sha> bash
 ```
 
 ### Route 2 — agent-guided install prompt
@@ -116,8 +116,11 @@ the URL.
 | `~/.codex/agents/` | Seven TOML agent files |
 | Active `~/.codex/AGENTS.override.md` or `~/.codex/AGENTS.md` | One `### Orchestration` section between `<!-- pilotfish-codex:begin -->` and `<!-- pilotfish-codex:end -->` markers |
 
-Fresh installs touch only `~/.codex/`. During a v1.0.x upgrade, the installer
-may also remove an obsolete marked Pilotfish block from the current project-root
+Fresh installs target only paths under `~/.codex/`. When one of those paths is
+an existing symlink, the scripted route preserves the symlink and atomically
+updates its resolved target; the timestamped backup remains beside the
+configured path. During a v1.0.x upgrade, the agent-guided installer may also
+remove an obsolete marked Pilotfish block from the current project-root
 `AGENTS.md`, but only after showing that exact migration, receiving approval,
 and backing up the file. Content outside the markers is preserved.
 
@@ -168,10 +171,11 @@ python3 install/verify_dispatch.py --live --yes
 
 `ADAPTER_OK` proves the temporary transport. `NATIVE_OK` is reserved for an
 adapter-free native probe. `SKIPPED` names an unavailable prerequisite;
-`FAILED` means routing evidence was missing or mismatched. A future stable
-Codex release may retire the schema workaround only after this command with
-`--mode native` returns `NATIVE_OK`; role TOMLs and semantic policy remain
-unchanged. The current verifier returns
+`FAILED` means routing evidence was missing or mismatched and prints a
+cost-safety warning to stop named-role delegation. A future stable Codex
+release may retire the schema workaround only after this command with `--mode
+native` returns `NATIVE_OK`; role TOMLs and semantic policy remain unchanged.
+The current verifier returns
 `SKIPPED: native_schema_introspection_unavailable` before quota or spawning,
 because Codex `0.144.4` has no safe adapter-free schema introspection surface.
 

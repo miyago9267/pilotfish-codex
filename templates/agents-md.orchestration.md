@@ -79,9 +79,10 @@ Every named-role call must supply all three routing fields:
 - `task_name` matches `[a-z0-9_]+`; and
 - `fork_turns = "none"` is the default.
 
-Use a bounded positive integer string for `fork_turns` only when the brief
-depends on recent turns. Never omit the field or request full history. Keep the
-brief self-contained whenever the default is sufficient.
+Use a positive integer string from `"1"` through `"3"` for `fork_turns` only
+when the brief depends on recent turns. Never omit the field, exceed that
+bound, or request full history. Keep the brief self-contained whenever the
+default is sufficient.
 
 If the `agents` namespace, `agent_type`, or installed role is unavailable, fail
 closed. Never retry the task with an untyped child because it can inherit the

@@ -27,7 +27,8 @@ Implementation and verification completed on 2026-07-15.
 - [x] P2. Configure the affected-release transport as `agents.spawn_agent` and
       require `agent_type`, `task_name`, and `fork_turns` on every delegation.
 - [x] P3. Require `task_name` to match `[a-z0-9_]+`; default
-      `fork_turns = "none"` and permit only a bounded positive integer string.
+      `fork_turns = "none"` and permit only positive integer strings from
+      `"1"` through `"3"`.
 - [x] P4. Add the fail-closed rule: never retry a rejected named role as an
       untyped child and never duplicate a role's model or effort in policy.
 - [x] P5. Preserve the main-session-only delegation rule so workers cannot

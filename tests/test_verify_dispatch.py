@@ -432,6 +432,28 @@ developer_instructions = "ignored by binding reader"
         )
         self.assertNotIn("spends real model quota", stderr.getvalue())
 
+    def test_failed_preflight_prints_cost_safety_warning(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with tempfile.TemporaryDirectory() as directory:
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                result = verify_main(
+                    [
+                        "--live",
+                        "--yes",
+                        "--codex-home",
+                        directory,
+                        "--repository-root",
+                        str(ROOT),
+                    ]
+                )
+
+        self.assertEqual(result, 1)
+        self.assertIn("FAILED reason=role_preflight_failed", stdout.getvalue())
+        self.assertIn("stop named-role dispatch", stderr.getvalue())
+        self.assertNotIn("spends real model quota", stderr.getvalue())
+
     def test_exec_failures_distinguish_unavailable_prerequisites(self) -> None:
         auth = classify_exec_failure(stdout="", stderr="Not logged in")
         model = classify_exec_failure(

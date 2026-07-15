@@ -6,7 +6,7 @@
 # Pin a version (recommended for teams) by pinning BOTH the script URL ref and
 # the templates ref:
 #
-#   PILOTFISH_REF=<tag-or-sha> curl -fsSL https://raw.githubusercontent.com/miyago9267/pilotfish-codex/<tag-or-sha>/install/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/miyago9267/pilotfish-codex/<tag-or-sha>/install/install.sh | PILOTFISH_REF=<tag-or-sha> bash
 #
 # Extra arguments are passed to install.py, e.g. `| bash -s -- --dry-run`.
 # Inside a local clone, `bash install/install.sh` uses the checkout directly.
