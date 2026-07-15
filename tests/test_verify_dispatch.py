@@ -693,6 +693,9 @@ developer_instructions = "ignored by binding reader"
         self.assertIn("agents.spawn_agent", adapter[-1])
         self.assertIn("agent_type='scout'", adapter[-1])
         self.assertIn("fork_turns='none'", adapter[-1])
+        self.assertIn("use only agent lifecycle tools", adapter[-1])
+        self.assertIn("without calling non-lifecycle tools", adapter[-1])
+        self.assertNotIn("Do not call any other tools", adapter[-1])
 
         self.assertIn("--ignore-user-config", native)
         self.assertNotIn(

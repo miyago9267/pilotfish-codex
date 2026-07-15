@@ -286,9 +286,9 @@ def build_codex_command(
     prompt = (
         f"Call {namespace}.spawn_agent exactly once with: "
         "task_name='model_probe', agent_type='scout', fork_turns='none', "
-        "message='Do not run commands. Reply only with READY.'. Then wait for "
-        "the child to finish, relay its answer, and close it. Do not call any "
-        "other tools."
+        "message='Do not run commands. Reply only with READY.'. Then use only "
+        "agent lifecycle tools to wait for the child to finish and close it; "
+        "relay its answer without calling non-lifecycle tools."
     )
     command = [
         codex_bin,
