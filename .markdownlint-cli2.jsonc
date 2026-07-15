@@ -1,0 +1,32 @@
+{
+  "config": {
+    "default": true,
+    "MD013": {
+      "line_length": 80,
+      "code_blocks": false,
+      "tables": false
+    },
+    "MD014": false,
+    "MD024": {
+      "siblings_only": true
+    },
+    "MD028": false,
+    "MD033": {
+      "allowed_elements": [
+        "a",
+        "img"
+      ]
+    },
+    "MD036": false,
+    "MD043": false,
+    "MD044": false,
+    "MD049": false,
+    "MD050": false,
+    "MD051": false,
+    "MD052": false,
+    "MD053": false,
+    "MD054": false,
+    "MD059": false,
+    "MD060": false
+  }
+}

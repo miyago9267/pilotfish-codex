@@ -1,12 +1,23 @@
 # Upstream Fable 5 Multi-Model Orchestration Research
 
-> Reference note: this document preserves the upstream research context behind pilotfish. pilotfish-codex keeps this attribution intact and applies the pattern to Codex CLI's agent configuration model.
+> Reference note: this document preserves the upstream research context behind
+> pilotfish. pilotfish-codex keeps this attribution intact and applies the
+> pattern to Codex CLI's agent configuration model.
 
 > 繁體中文原版：[research.zh-TW.md](./research.zh-TW.md)（this is a faithful English translation）
 
 ## Purpose
 
-This document collects a sourced research pass from early July 2026 on "how to maximize the value of Claude Fable 5": Fable 5's real strengths versus Opus 4.8 and the scenarios where it's wasteful, the quota economics of Claude subscriptions, the multi-model orchestration mechanisms Claude Code officially provides, and the community's measured numbers and patterns. pilotfish's three-layer architecture (see [design.md](./design.md)) is the applied conclusion of this research. Method: four parallel research agents (official docs, community patterns, subscription economics, Claude Code mechanisms) plus a verification pass against code.claude.com official documentation; data current as of 2026-07-09.
+This document collects a sourced research pass from early July 2026 on "how to
+maximize the value of Claude Fable 5": Fable 5's real strengths versus Opus 4.8
+and the scenarios where it's wasteful, the quota economics of Claude
+subscriptions, the multi-model orchestration mechanisms Claude Code officially
+provides, and the community's measured numbers and patterns. pilotfish's
+three-layer architecture (see [design.md](./design.md)) is the applied conclusion
+of this research. Method: four parallel research agents (official docs,
+community patterns, subscription economics, Claude Code mechanisms) plus a
+verification pass against code.claude.com official documentation; data current
+as of 2026-07-09.
 
 ## Contents
 
@@ -30,7 +41,9 @@ This document collects a sourced research pass from early July 2026 on "how to m
 | Release | GA 2026-06-09; briefly pulled under export controls, restored 07-01 |
 | Data retention | Mandatory 30 days — ZDR orgs get 400 on every request |
 
-The official prompting guide lists seven advantage areas, under one core principle: **"the longer and more complex the task, the larger Fable 5's lead."**
+The official prompting guide lists seven advantage areas, under one core
+principle: **"the longer and more complex the task, the larger Fable 5's
+lead."**
 
 | Advantage area | Notes |
 |---|---|
@@ -42,7 +55,9 @@ The official prompting guide lists seven advantage areas, under one core princip
 | Ambiguity | Notably better at navigating under-specified asks |
 | Delegated collaboration | Dispatching and sustaining parallel subagents is markedly more reliable — a born orchestrator |
 
-Representative benchmarks: SWE-Bench Pro 80.3% (Opus 4.8: 69.2%), Cognition FrontierCode 29.3% (Opus 4.8: 13.4%) — both are Anthropic-self-reported figures (own scaffolding / system card), not independently verified.
+Representative benchmarks: SWE-Bench Pro 80.3% (Opus 4.8: 69.2%), Cognition
+FrontierCode 29.3% (Opus 4.8: 13.4%) — both are Anthropic-self-reported figures
+(own scaffolding / system card), not independently verified.
 
 ## When not to use Fable 5
 
@@ -54,7 +69,10 @@ Representative benchmarks: SWE-Bench Pro 80.3% (Opus 4.8: 69.2%), Cognition Fron
 | ZDR organizations | 30-day retention is a hard requirement | Unavailable |
 | Mechanical, token-heavy work | Renames, test runs, formatting don't need frontier reasoning | Haiku / Sonnet |
 
-> **Tip:** The community's consensus escalation rule: "start with the cheapest model that reliably does the job, and escalate to Fable 5 only when Opus 4.8 visibly fails, loses the plan mid-task, or burns more total tokens through retries."
+> **Tip:** The community's consensus escalation rule: "start with the cheapest
+> model that reliably does the job, and escalate to Fable 5 only when Opus 4.8
+> visibly fails, loses the plan mid-task, or burns more total tokens through
+> retries."
 
 ## Subscription quota economics
 
@@ -76,11 +94,19 @@ Fable 5's subscription timeline (as of 2026-07-09):
 | 2026-07-07 | Official five-day extension of subscription inclusion |
 | After 2026-07-12 | Leaves subscription limits: prepaid usage credits at API rates ($10/$50) required; Anthropic states the goal is to restore it as a standard plan feature once capacity allows |
 
-> ⚠️ **Warning:** This is exactly why the fallback design is non-negotiable. Per the documented rule, `best` resolves to the latest Opus once an account loses Fable 5 access; the June 2026 outage behaved consistently with this — a notice banner plus new sessions automatically continuing on Opus, while **users who had pinned the full model ID got hard 404s**. But the exact UI at the 7/12 billing boundary (auto-degrade, error, or a credits prompt) is unpublished — and `fallbackModel` explicitly never triggers on billing-class errors, so it cannot catch this case. Worst case is one manual switch.
+> ⚠️ **Warning:** This is exactly why the fallback design is non-negotiable. Per
+> the documented rule, `best` resolves to the latest Opus once an account loses
+> Fable 5 access; the June 2026 outage behaved consistently with this — a notice
+> banner plus new sessions automatically continuing on Opus, while **users who
+> had pinned the full model ID got hard 404s**. But the exact UI at the 7/12
+> billing boundary (auto-degrade, error, or a credits prompt) is unpublished —
+> and `fallbackModel` explicitly never triggers on billing-class errors, so it
+> cannot catch this case. Worst case is one manual switch.
 
 ## Official Claude Code mechanisms
 
-All verified line-by-line against official docs (code.claude.com — sub-agents, model-config, settings pages):
+All verified line-by-line against official docs (code.claude.com — sub-agents,
+model-config, settings pages):
 
 | Mechanism | Detail |
 |---|---|
@@ -112,7 +138,8 @@ All verified line-by-line against official docs (code.claude.com — sub-agents,
 
 ## Effort tiering
 
-Effort is the second-biggest quota lever, and Fable 5's guidance **differs** from the Opus 4.7/4.8 generation:
+Effort is the second-biggest quota lever, and Fable 5's guidance **differs** from
+the Opus 4.7/4.8 generation:
 
 | Target | Recommended effort | Why |
 |---|---|---|

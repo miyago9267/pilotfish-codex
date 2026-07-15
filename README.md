@@ -112,6 +112,21 @@ back to doing the work itself.
 **Adjust reasoning:** Each TOML has `model_reasoning_effort`. Available levels
 depend on the model (luna supports up to `max`, sol supports up to `ultra`).
 
+## Development
+
+Install the pinned tooling and run the same Markdown check used by CI:
+
+```bash
+bun install --frozen-lockfile
+bun run lint:md
+```
+
+Policy regression tests use the Python standard library:
+
+```bash
+python3 -m unittest tests/test_policy.py
+```
+
 ## Uninstall
 
 1. Delete the six `.toml` files from `~/.codex/agents/`

@@ -1,0 +1,11 @@
+{
+  "name": "pilotfish-codex-tooling",
+  "private": true,
+  "packageManager": "bun@1.3.11",
+  "scripts": {
+    "lint:md": "markdownlint-cli2 \"**/*.md\" \"#node_modules\""
+  },
+  "devDependencies": {
+    "markdownlint-cli2": "0.23.0"
+  }
+}

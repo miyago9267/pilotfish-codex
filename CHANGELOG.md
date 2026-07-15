@@ -18,6 +18,9 @@ are noted only as source references.
   owned by the TOML role definitions.
 - Replace detached `nohup` execution with exact-context handoff rules across all
   Bash-capable worker roles.
+- Add pinned project-local Markdown lint tooling and a GitHub Actions job that
+  runs the same `bun run lint:md` command.
+- Normalize existing Markdown files to the repository lint rules.
 
 ## v1.0.1 — 2026-07-10
 
