@@ -66,7 +66,11 @@ def _verdict(
 
 
 def _payloads(events: Iterable[dict], item_type: str) -> list[dict]:
-    return [event.get("payload", {}) for event in events if event.get("type") == item_type]
+    return [
+        event["payload"]
+        for event in events
+        if event.get("type") == item_type and isinstance(event.get("payload"), dict)
+    ]
 
 
 def load_jsonl(path: Path) -> list[dict]:
@@ -86,6 +90,9 @@ def load_jsonl(path: Path) -> list[dict]:
             raise EvidenceError(f"{path}:{line_number}: invalid JSON") from exc
         if not isinstance(event, dict):
             raise EvidenceError(f"{path}:{line_number}: event is not an object")
+        payload = event.get("payload")
+        if payload is not None and not isinstance(payload, dict):
+            raise EvidenceError(f"{path}:{line_number}: payload is not an object")
         events.append(event)
 
     if not events:
@@ -123,8 +130,13 @@ def locate_rollout(
     thread_id: str,
     candidate_directories: Iterable[Path],
 ) -> Path:
-    """Find one rollout by exact thread-ID suffix in bounded day directories."""
+    """Find one rollout by exact thread-ID suffix in bounded day directories.
+
+    The suffix comparison is literal on purpose: a thread ID is evidence
+    parsed from exec output, so glob metacharacters in it must never change
+    which file matches."""
     trust_root = sessions_root.resolve()
+    suffix = f"-{thread_id}.jsonl"
     matches: set[Path] = set()
     for directory in candidate_directories:
         resolved_directory = directory.resolve()
@@ -134,7 +146,9 @@ def locate_rollout(
                 f"{resolved_directory}"
             )
         if resolved_directory.is_dir():
-            for path in resolved_directory.glob(f"*-{thread_id}.jsonl"):
+            for path in resolved_directory.iterdir():
+                if not path.name.endswith(suffix) or not path.is_file():
+                    continue
                 resolved_path = path.resolve()
                 if not resolved_path.is_relative_to(trust_root):
                     raise EvidenceError(

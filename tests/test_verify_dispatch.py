@@ -21,6 +21,7 @@ from verify_dispatch import (  # noqa: E402
     classify_exec_failure,
     extract_child_thread_id,
     inspect_dispatch,
+    load_jsonl,
     locate_rollout,
     main as verify_main,
     parse_exec_thread_id,
@@ -265,6 +266,46 @@ class DispatchRolloutLocationTests(unittest.TestCase):
 
             with self.assertRaises(EvidenceError):
                 locate_rollout(root, PARENT_ID, [day, duplicate_day])
+
+    def test_rollout_rejects_non_object_payloads_instead_of_crashing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            rollout = Path(directory) / "rollout.jsonl"
+            rollout.write_text(
+                json.dumps({"type": "response_item", "payload": "not-an-object"})
+                + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaises(EvidenceError):
+                load_jsonl(rollout)
+
+        hostile = [
+            {"type": "session_meta", "payload": "spoof"},
+            {"type": "turn_context", "payload": None},
+        ]
+        verdict = inspect_dispatch(
+            hostile,
+            [],
+            expected_role=RoleBinding(model="gpt-5.6-luna", effort="low"),
+            expected_namespace="agents",
+        )
+        self.assertEqual(verdict.status, "FAILED")
+
+    def test_rollout_lookup_treats_glob_metacharacters_literally(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            day = root / "2026" / "07" / "15"
+            day.mkdir(parents=True)
+            (day / "rollout-test-abcd1.jsonl").write_text("{}\n", encoding="utf-8")
+
+            for hostile in ("abcd?", "abcd[1]", "abc*", "*", "**/abcd1"):
+                with self.assertRaises(EvidenceError):
+                    locate_rollout(root, hostile, [day])
+
+            literal = day / "rollout-test-abcd[1].jsonl"
+            literal.write_text("{}\n", encoding="utf-8")
+            self.assertEqual(
+                locate_rollout(root, "abcd[1]", [day]), literal.resolve()
+            )
 
     def test_rollout_lookup_does_not_fall_back_to_fuzzy_matches(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
