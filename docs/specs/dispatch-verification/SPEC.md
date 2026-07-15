@@ -4,6 +4,8 @@
 - Status: Draft
 - Owner: Miyago
 - Created: 2026-07-15
+- Discussion: [#2 — Does role-based model dispatch actually fire?](https://github.com/miyago9267/pilotfish-codex/discussions/2)
+  (community input on the open questions below)
 
 ## Context
 
@@ -105,6 +107,32 @@ design.md's "policy-only until discipline slips" stance holds. Decision: ship a
 `SubagentStart` guard as an **optional** add-on (not default install) that
 rejects or warns when a spawned role's model/effort does not match its TOML.
 Keeps the default install policy-only; gives teams who want a hard gate one.
+
+## Open questions (community)
+
+Tracked in discussion [#2](https://github.com/miyago9267/pilotfish-codex/discussions/2);
+answers feed the ADRs and tasks above.
+
+### Gap A
+
+- Q-A1: Is there any supported way to get subagents in a headless/scriptable
+  Codex surface (e.g. `codex app-server` JSON-RPC), or is interactive the only
+  path? (Resolves ADR-1 / ADR-2 and task B1.)
+- Q-A2: Should pilotfish-codex detect the headless surface and emit a one-line
+  "delegation unavailable here" notice, or is docs-only the right call?
+  (Resolves task A3.)
+
+### Gap B
+
+- Q-B1: What is the cleanest scriptable way to assert a spawned role's
+  *effective* model/effort equals its TOML binding? Does `codex app-server`
+  expose the child's resolved model in a way a test can read? (Resolves B2/B3.)
+- Q-B2: Is a `SubagentStart` guard that rejects/warns on model↔role mismatch
+  worth shipping as opt-in, or does it fight Codex's own routing? (Resolves
+  ADR-3 / B4.)
+- Q-B3: Has anyone built an eval that a task *class* triggers the *correct* role
+  (not just that spawning works)? This is the real role-distribution proof and
+  is currently a non-goal here — link prior art if it exists.
 
 ## Acceptance
 
