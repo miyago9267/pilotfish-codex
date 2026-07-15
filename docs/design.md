@@ -43,6 +43,48 @@ flowchart LR
 > model IDs or reasoning levels. Routing changes in agent TOMLs must not require
 > rewriting the policy.
 
+## MultiAgentV2 compatibility boundary
+
+MultiAgentV2 introduces a temporary fourth concern inside the machine layer: a
+Compatibility adapter controls how the typed spawn surface is exposed. It does
+not own role routing. The stable boundaries are:
+
+| Layer | Owns | Migration stability |
+|---|---|---|
+| Role TOMLs | Model, effort, sandbox, and role instructions | Stable |
+| Orchestration policy | Typed role, task boundary, context budget, and fail-closed behavior | Stable |
+| Compatibility adapter | Tool namespace and temporary MultiAgentV2 config | Replaceable |
+
+On affected releases the adapter exposes `agents.spawn_agent` with
+`agent_type`. Namespace-specific prose is isolated between transport markers in
+the policy template. The rest of the policy names roles without embedding
+models, so removing the adapter does not rewrite orchestration semantics.
+
+Support is capability-driven:
+
+| State | Required evidence | Behavior |
+|---|---|---|
+| `adapter-required` | Typed `agents.spawn_agent` and matching child rollout | Report `ADAPTER_OK` |
+| `native-ready` | Adapter-free native typed spawn and matching child rollout | Report `NATIVE_OK` |
+| `unsupported` | Neither route proves the installed role binding | Fail closed |
+| `not-exercised` | V1 or a prerequisite is unavailable | Report an exact `SKIPPED` reason |
+
+Unsupported named-role routing must fail closed.
+
+Version strings and `codex features list` are hints, because the backend can
+select V2 independently of local feature output. The static packaging proof
+validates config, policy, and role files without quota. The live routing proof
+correlates one parent spawn call to its exact child thread and compares the
+child model and effort with the installed role.
+
+Native migration requires a stable Codex release, adapter-free typed
+`agent_type`, and a `NATIVE_OK` E2E result. Only the machine adapter and isolated
+transport paragraph change. Concurrency support is revalidated separately;
+the role TOMLs, bounded-context rule, and fail-closed contract remain intact.
+Until Codex exposes safe adapter-free spawn-schema introspection, native mode
+returns `SKIPPED` before quota or child creation instead of risking an untyped
+probe.
+
 ## Seven Codex roles
 
 The Codex roster is the smallest non-overlapping projection of the current

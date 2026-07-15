@@ -5,6 +5,36 @@ the policy block in `AGENTS.md` (`<!-- pilotfish-codex vX.Y.Z -->`).
 pilotfish-codex uses its own semantic versioning; upstream pilotfish versions
 are noted only as source references.
 
+## v1.2.0 — 2026-07-15
+
+- Add the three-key MultiAgentV2 compatibility adapter so named roles remain
+  selectable outside the reserved collaboration schema.
+- Require typed, bounded `agents.spawn_agent` calls and fail closed instead of
+  retrying an untyped child that can inherit the parent model.
+- Extend static validation to cover adapter shape and concurrency boundaries.
+- Add an opt-in live verifier that correlates one exact parent and child
+  rollout, then proves the child model differs from the parent and matches the
+  installed role TOML.
+- Isolate the temporary transport so stable native `agent_type` support can
+  replace the adapter without changing role TOMLs or semantic policy.
+- Add a scripted install route (`install/install.sh` + `install/install.py`):
+  one-line curl install with a byte-preserving config merge, timestamped
+  backups, idempotent re-runs, and exit-2 aborts on states that need the
+  agent-guided runbook's human decisions.
+- Make the scripted route plan and validate every target before writing,
+  preserve CRLF and instruction symlinks, use atomic replacements with
+  rollback, refuse unapproved role overwrites or duplicate role names, reject
+  managed-path aliases and non-file symlink targets, and safely repair an empty
+  explicit adapter table.
+- Correct pinned bootstrap syntax so the selected ref reaches `bash`, and keep
+  dry runs free of target-directory writes.
+- Fail closed on non-object rollout payloads, match rollout IDs literally, and
+  print a cost-safety warning for every `FAILED` routing verdict. Require
+  non-empty correlation IDs and complete, consistent model-context evidence;
+  reject malformed evidence events, exec events, and spawn arguments without
+  traceback.
+- Add Python CI for unit tests, syntax checks, and packaged config validation.
+
 ## v1.1.0 — 2026-07-15
 
 - Establish pilotfish-codex as an independent Codex-native project while

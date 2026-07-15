@@ -1,37 +1,33 @@
-# TESTS — dispatch-verification (EARS acceptance)
+# TESTS — dispatch-verification
 
-## Gap A — headless boundary
+## Headless mechanism proof
 
-- **AC-A1**: When a reader consults `README.md`, the docs shall state that
-  delegation works only in interactive / app-server sessions and that
-  `codex exec` exposes no `spawn_agent`.
-- **AC-A2**: When a reader consults `docs/design.md`, the docs shall record the
-  headless boundary as a known constraint, with the evidence that forcing
-  `features.multi_agent` and `features.enable_fanout` in `codex exec` still
-  yields no `spawn_agent`.
+- **AC-A1**: When the adapter E2E runs, `codex exec --json` shall expose one
+  typed `agents.spawn_agent` call for `scout`.
+- **AC-A2**: When the spawn starts, the verifier shall correlate its call ID and
+  canonical task path to one exact child thread ID.
+- **AC-A3**: When the child is inspected, its session shall name the exact
+  parent and its model and effort shall match installed scout routing.
+- **AC-A4**: When parent and child use the same model, verification shall fail
+  with `inherited_parent_model`.
 
-## Gap B — runtime proof
+## Failure and boundary behavior
 
-- **AC-B1**: When the e2e runs against a `codex app-server` that supports
-  multi-agent, it shall spawn `scout` and assert the child's effective model is
-  `gpt-5.6-luna` and effort is `low`.
-- **AC-B2**: When app-server or the multi-agent surface is unavailable, the e2e
-  shall report SKIPPED with the reason, and shall not fail.
-- **AC-B3**: When the full e2e runs, each of the seven roles shall be asserted to
-  bind to the model and effort declared in its `~/.codex/agents/<role>.toml`.
+- **AC-B1**: When V1 is active, verification shall report
+  `SKIPPED: adapter_not_exercised`.
+- **AC-B2**: When safe adapter-free schema introspection is unavailable, the
+  native probe shall report
+  `SKIPPED: native_schema_introspection_unavailable` before quota or child
+  creation.
+- **AC-B3**: When namespace, role, context, parent relation, model, or effort
+  differs, verification shall report `FAILED` and shall not infer success.
+- **AC-B4**: When rollout lookup runs, it shall accept one exact thread-ID
+  suffix in bounded day directories and reject fuzzy, duplicate, or out-of-root
+  candidates.
+- **AC-B5**: When normal tests run, they shall not call Codex, spend model quota,
+  or scan the full user session store.
 
-## Gap B — enforcement
+## Evidence boundary
 
-- **AC-B4**: While the optional `SubagentStart` guard is enabled, when a role is
-  spawned whose effective model or effort differs from its TOML binding, the
-  guard shall emit a mismatch warning (or block, per its configured mode).
-- **AC-B5**: While the guard is enabled, when a role is spawned that matches its
-  TOML binding, the guard shall stay silent and allow the spawn.
-- **AC-B6**: When the guard is not installed, the default pilotfish-codex
-  install behavior shall be unchanged (policy-only).
-
-## Regression
-
-- **AC-R1**: Existing `tests/test_policy.py` and `tests/test_templates.py`
-  assertions shall continue to pass (template self-consistency is unaffected by
-  this work).
+- **AC-C1**: A green explicit-role E2E shall not be described as proof that the
+  orchestrator chooses the correct role for every task class.

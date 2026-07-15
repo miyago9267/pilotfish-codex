@@ -21,9 +21,9 @@ attribution and maintains the Codex-specific adaptation: TOML role agents, an
 `AGENTS.md` orchestration policy, and an installer for `~/.codex/`. See the
 [Codex design mapping](./docs/design.md) for the adaptation boundary.
 
-v1.1.0 ports Pilotfish v1.2's phase-aware orchestration. Remora 0.1.10 is the
-reference only for the GPT-5.6 model and reasoning-effort bindings shared by
-the seven Codex roles.
+v1.2.0 adds cost-safe MultiAgentV2 compatibility and live named-role dispatch
+proof. Remora 0.1.10 remains the reference only for the GPT-5.6 model and
+reasoning-effort bindings shared by the seven Codex roles.
 
 > **Codex-specific boundary:** The Claude-only `Explore` override is
 > intentionally not installed. Pilotfish uses that exact name to shadow Claude
@@ -36,9 +36,11 @@ Three layers, all under `~/.codex/`:
 
 | Layer | File(s) | Job |
 |---|---|---|
-| **Model default** | `config.toml` | Sets the main-session model to `gpt-5.6-sol`; main-session effort remains user-controlled |
+| **Machine adapter** | `config.toml` | Sets the main-session default and exposes typed MultiAgentV2 role dispatch with bounded concurrency |
 | **Role agents** | `agents/*.toml` | Seven TOML files, each owning one role contract, model, and reasoning level |
 | **Delegation policy** | `AGENTS.md` | Tells the orchestrator when to delegate and to whom |
+
+The main-session effort remains user-controlled.
 
 ### The seven Codex roles
 
@@ -67,7 +69,32 @@ Three layers, all under `~/.codex/`:
 
 ## Install
 
-> Requires Codex CLI 0.144.1 or newer.
+> Requires Codex CLI 0.144.1 or newer and Python 3.11+.
+
+Both routes install the same files and keep timestamped backups of anything
+they replace. After either route, start a **new** Codex session — a running
+session keeps the old spawn schema.
+
+### Route 1 — one-line script
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/miyago9267/pilotfish-codex/main/install/install.sh | bash
+```
+
+Non-interactive and idempotent: it merges only the managed keys into
+`~/.codex/config.toml` (unrelated keys, comments, and formatting survive byte
+for byte), installs the seven role TOMLs, and replaces the marked
+orchestration block. Preview with `... | bash -s -- --dry-run`. Anything that
+needs a human decision (an explicit `multi_agent = false`, a forced
+`multi_agent_v2.enabled = true`, unmatched markers, or a differing existing
+role TOML) aborts without writing — use Route 2 for those. Pin a version by
+replacing `main` in the URL and setting the same ref on the `bash` process:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/miyago9267/pilotfish-codex/<tag-or-sha>/install/install.sh | PILOTFISH_REF=<tag-or-sha> bash
+```
+
+### Route 2 — agent-guided install prompt
 
 Paste this into a Codex CLI session:
 
@@ -76,26 +103,82 @@ Read https://raw.githubusercontent.com/miyago9267/pilotfish-codex/main/install/A
 ```
 
 The agent will read the runbook, show you a plan of every change, and wait for
-your approval before writing anything. The whole process takes about a minute.
-
-To pin to a specific version (recommended for teams):
-
-```text
-Read https://raw.githubusercontent.com/miyago9267/pilotfish-codex/<commit-sha>/install/AGENT-INSTALL.md and follow it to install pilotfish-codex into my global Codex configuration.
-```
+your approval before writing anything. This route also handles v1.0.x
+migrations and any state the script refuses to decide. To pin to a specific
+version (recommended for teams), replace `main` with a tag or commit SHA in
+the URL.
 
 ## What gets installed
 
 | Target | Change |
 |---|---|
-| `~/.codex/config.toml` | Optionally set `model` to `gpt-5.6-sol`, enable multi-agent support, cap concurrency at three leaf threads, and cap nesting at one leaf generation |
+| `~/.codex/config.toml` | Optionally set `model` to `gpt-5.6-sol`, enable legacy multi-agent fallback, install the MultiAgentV2 compatibility adapter, and bound concurrency |
 | `~/.codex/agents/` | Seven TOML agent files |
 | Active `~/.codex/AGENTS.override.md` or `~/.codex/AGENTS.md` | One `### Orchestration` section between `<!-- pilotfish-codex:begin -->` and `<!-- pilotfish-codex:end -->` markers |
 
-Fresh installs touch only `~/.codex/`. During a v1.0.x upgrade, the installer
-may also remove an obsolete marked Pilotfish block from the current project-root
+Fresh installs target only paths under `~/.codex/`. When one of those paths is
+an existing symlink to a regular file, the scripted route preserves the
+symlink and atomically updates its resolved target; broken or non-file targets
+abort before writes. The timestamped backup remains beside the configured
+path. During a v1.0.x upgrade, the agent-guided installer may also
+remove an obsolete marked Pilotfish block from the current project-root
 `AGENTS.md`, but only after showing that exact migration, receiving approval,
 and backing up the file. Content outside the markers is preserved.
+
+## MultiAgentV2 compatibility
+
+Affected Codex releases hide `agent_type` from the default MultiAgentV2 spawn
+schema. An untyped child inherits the parent model, so a Sol orchestrator can
+silently create another Sol worker instead of the Luna or Terra role selected
+by Pilotfish.
+
+The temporary machine adapter restores typed role routing outside the reserved
+collaboration namespace:
+
+```toml
+[features.multi_agent_v2]
+hide_spawn_agent_metadata = false
+tool_namespace = "agents"
+max_concurrent_threads_per_session = 4
+```
+
+Do not set `features.multi_agent_v2.enabled`: Codex may select V2 for the live
+turn even when the local feature list says otherwise, and locally enabling it
+conflicts with the retained legacy `agents.max_threads` fallback on the
+verified `0.144.4` release. The packaged concurrency is four active threads
+including root. Pilotfish accepts values from 1 through 8, warns outside the
+recommended value, and treats 1 as child delegation disabled.
+
+The policy calls `agents.spawn_agent` with `agent_type`, a lowercase task name,
+and explicit bounded context. If typed role routing is unavailable, it must
+fail closed instead of retrying an untyped inherited-model child. Start a fresh
+Codex session after changing the config or installed roles.
+
+Static validation proves the installed config and role files are internally
+consistent:
+
+```bash
+python3 install/validate_agents.py \
+  --config ~/.codex/config.toml ~/.codex/agents
+```
+
+The optional E2E probe spends real quota. It starts a Terra parent, routes one
+`scout`, and requires the exact child rollout to report the installed Luna
+binding:
+
+```bash
+python3 install/verify_dispatch.py --live --yes
+```
+
+`ADAPTER_OK` proves the temporary transport. `NATIVE_OK` is reserved for an
+adapter-free native probe. `SKIPPED` names an unavailable prerequisite;
+`FAILED` means routing evidence was missing or mismatched and prints a
+cost-safety warning to stop named-role delegation. A future stable Codex
+release may retire the schema workaround only after this command with `--mode
+native` returns `NATIVE_OK`; role TOMLs and semantic policy remain unchanged.
+The current verifier returns
+`SKIPPED: native_schema_introspection_unavailable` before quota or spawning,
+because Codex `0.144.4` has no safe adapter-free schema introspection surface.
 
 ## Updating
 
@@ -130,8 +213,8 @@ determine the pilotfish-codex version number.
 | `verifier` | Opus | gpt-5.6-sol, high |
 | `security-executor` | Opus (high effort) | gpt-5.6-sol, max |
 
-Swap model names in the TOML files to match your available models —
-pilotfish-codex is just config, not runtime code.
+Swap model names in the TOML files to match your available models. Production
+routing remains config-driven; the verifier only supplies explicit proof.
 
 ## Tuning
 
@@ -147,17 +230,15 @@ depend on the model (luna supports up to `max`, sol supports up to `ultra`).
 
 ## Development
 
-Install the pinned tooling and run the same Markdown check used by CI:
+Run the same checks enforced by CI:
 
 ```bash
 bun install --frozen-lockfile
 bun run lint:md
-```
-
-Policy regression tests use the Python standard library:
-
-```bash
 python3 -m unittest discover -s tests -v
+python3 -m py_compile install/install.py install/validate_agents.py install/verify_dispatch.py
+bash -n install/install.sh
+python3 install/validate_agents.py
 ```
 
 > **Read-only boundary:** `scout`, `plan-verifier`, and `security-reviewer`

@@ -53,6 +53,21 @@ class PolicyTests(unittest.TestCase):
             self.assertIn("absolute working directory", content)
             self.assertIn("completion criterion", content)
 
+    def test_named_role_transport_is_typed_bounded_and_fail_closed(self) -> None:
+        policy = (ROOT / "templates" / "agents-md.orchestration.md").read_text()
+
+        self.assertEqual(policy.count("pilotfish-codex:spawn-transport:begin"), 1)
+        self.assertEqual(policy.count("pilotfish-codex:spawn-transport:end"), 1)
+        self.assertIn("`agents.spawn_agent`", policy)
+        self.assertIn("`agent_type`", policy)
+        self.assertIn("`task_name`", policy)
+        self.assertIn("`[a-z0-9_]+`", policy)
+        self.assertIn('`fork_turns = "none"`', policy)
+        self.assertIn('positive integer string from `"1"` through `"3"`', policy)
+        self.assertIn("Never retry the task with an untyped child", policy)
+        self.assertRegex(policy, r"fail\s+closed")
+        self.assertNotIn('fork_turns = "all"', policy)
+
 
 if __name__ == "__main__":
     unittest.main()

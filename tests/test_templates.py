@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import re
 import sys
+import tempfile
 import tomllib
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 
@@ -12,7 +15,13 @@ ROOT = Path(__file__).resolve().parents[1]
 AGENTS_DIR = ROOT / "templates" / "agents"
 sys.path.insert(0, str(ROOT / "install"))
 
-from validate_agents import validate_agent, validate_dir  # noqa: E402
+from validate_agents import (  # noqa: E402
+    validate_agent,
+    validate_config,
+    validate_dir,
+    validate_multi_agent_v2_config,
+    main as validate_main,
+)
 ROUTING = {
     "scout": ("gpt-5.6-luna", "low", "read-only"),
     "plan-verifier": ("gpt-5.6-sol", "medium", "read-only"),
@@ -72,6 +81,11 @@ class TemplateContractTests(unittest.TestCase):
         self.assertEqual(config["model"], "gpt-5.6-sol")
         self.assertNotIn("model_reasoning_effort", config)
         self.assertTrue(config["features"]["multi_agent"])
+        adapter = config["features"]["multi_agent_v2"]
+        self.assertFalse(adapter["hide_spawn_agent_metadata"])
+        self.assertEqual(adapter["tool_namespace"], "agents")
+        self.assertEqual(adapter["max_concurrent_threads_per_session"], 4)
+        self.assertNotIn("enabled", adapter)
         self.assertEqual(config["agents"]["max_threads"], 3)
         self.assertEqual(config["agents"]["max_depth"], 1)
 
@@ -120,6 +134,17 @@ class TemplateContractTests(unittest.TestCase):
         self.assertRegex(
             installer,
             r"do not claim an exact\s+seven-role installation",
+        )
+        self.assertIn("[features.multi_agent_v2]", installer)
+        self.assertIn("hide_spawn_agent_metadata", installer)
+        self.assertIn("tool_namespace", installer)
+        self.assertIn("max_concurrent_threads_per_session", installer)
+        self.assertIn("Do not set `features.multi_agent_v2.enabled`", installer)
+        self.assertIn("start a fresh Codex session", installer)
+        self.assertIn("install/verify_dispatch.py --live --yes", installer)
+        self.assertIn(
+            "--config ~/.codex/config.toml ~/.codex/agents",
+            installer,
         )
 
         for role in ROUTING:
@@ -173,6 +198,10 @@ class TemplateContractTests(unittest.TestCase):
         self.assertIn("main-session effort remains user-controlled", readme)
         self.assertIn("parent-session permission override", readme)
         self.assertIn("obsolete marked Pilotfish block", readme)
+        self.assertIn("MultiAgentV2 compatibility", readme)
+        self.assertIn("install/verify_dispatch.py --live --yes", readme)
+        self.assertIn("ADAPTER_OK", readme)
+        self.assertIn("NATIVE_OK", readme)
 
         for role in ROUTING:
             self.assertIn(f"`{role}`", readme)
@@ -183,6 +212,12 @@ class TemplateContractTests(unittest.TestCase):
         self.assertIn("Pilotfish's uppercase `Explore` role is deliberately absent", design)
         self.assertIn("policy names roles but never embeds", design)
         self.assertIn("delegation-planning layer", design)
+        self.assertIn("Compatibility adapter", design)
+        self.assertIn("adapter-required", design)
+        self.assertIn("native-ready", design)
+        self.assertIn("fail closed", design)
+        self.assertIn("static packaging proof", design)
+        self.assertIn("live routing proof", design)
 
 
 class AgentStaticValidationTests(unittest.TestCase):
@@ -232,6 +267,144 @@ class AgentStaticValidationTests(unittest.TestCase):
         agent = dict(self.VALID, developer_instructions="   ")
         errors = validate_agent(agent)
         self.assertTrue(any("cannot be blank" in e for e in errors))
+
+
+class MultiAgentV2ConfigValidationTests(unittest.TestCase):
+    def valid_config(self, concurrency: object = 4) -> dict:
+        return {
+            "features": {
+                "multi_agent": True,
+                "multi_agent_v2": {
+                    "hide_spawn_agent_metadata": False,
+                    "tool_namespace": "agents",
+                    "max_concurrent_threads_per_session": concurrency,
+                },
+            },
+            "agents": {"max_threads": 3, "max_depth": 1},
+        }
+
+    def test_packaged_adapter_is_valid_and_defaults_to_four(self) -> None:
+        config = load_toml(ROOT / "templates" / "config.snippet.toml")
+
+        errors, warnings = validate_multi_agent_v2_config(config)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(warnings, [])
+        self.assertNotIn("enabled", config["features"]["multi_agent_v2"])
+
+    def test_partial_or_forced_adapter_fails_closed(self) -> None:
+        missing_namespace = self.valid_config()
+        del missing_namespace["features"]["multi_agent_v2"]["tool_namespace"]
+        forced_v2 = self.valid_config()
+        forced_v2["features"]["multi_agent_v2"]["enabled"] = True
+
+        missing_errors, _ = validate_multi_agent_v2_config(missing_namespace)
+        forced_errors, _ = validate_multi_agent_v2_config(forced_v2)
+
+        self.assertTrue(any("tool_namespace" in error for error in missing_errors))
+        self.assertTrue(any("enabled" in error for error in forced_errors))
+
+        missing_concurrency = self.valid_config()
+        del missing_concurrency["features"]["multi_agent_v2"][
+            "max_concurrent_threads_per_session"
+        ]
+        missing_errors, _ = validate_multi_agent_v2_config(missing_concurrency)
+        self.assertTrue(any("concurrency" in error for error in missing_errors))
+
+        missing_table, _ = validate_multi_agent_v2_config({"features": {}})
+        self.assertTrue(any("table is missing" in error for error in missing_table))
+
+    def test_concurrency_boundaries_and_warnings(self) -> None:
+        invalid_values = (0, 9, "4", True)
+        for value in invalid_values:
+            with self.subTest(value=value):
+                errors, _ = validate_multi_agent_v2_config(self.valid_config(value))
+                self.assertTrue(any("concurrency" in error for error in errors))
+
+        errors, warnings = validate_multi_agent_v2_config(self.valid_config(1))
+        self.assertEqual(errors, [])
+        self.assertTrue(any("disables child delegation" in item for item in warnings))
+
+        errors, warnings = validate_multi_agent_v2_config(self.valid_config(3))
+        self.assertEqual(errors, [])
+        self.assertTrue(any("recommended value is 4" in item for item in warnings))
+
+        errors, warnings = validate_multi_agent_v2_config(self.valid_config(5))
+        self.assertEqual(errors, [])
+        self.assertTrue(any("higher cost" in item for item in warnings))
+
+        errors, warnings = validate_multi_agent_v2_config(self.valid_config(8))
+        self.assertEqual(errors, [])
+        self.assertTrue(any("higher cost" in item for item in warnings))
+
+    def test_config_file_reports_malformed_toml(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.toml"
+            path.write_text("[features.multi_agent_v2\n", encoding="utf-8")
+
+            errors, warnings = validate_config(path)
+
+        self.assertEqual(warnings, [])
+        self.assertTrue(any("invalid TOML" in error for error in errors))
+
+    def test_cli_validates_an_explicit_config_and_agent_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "config.toml"
+            config_path.write_bytes(
+                (ROOT / "templates" / "config.snippet.toml").read_bytes()
+            )
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                result = validate_main(
+                    ["--config", str(config_path), str(AGENTS_DIR)]
+                )
+
+        self.assertEqual(result, 0)
+        self.assertIn("all Pilotfish config and agent TOMLs valid", stdout.getvalue())
+        self.assertEqual(stderr.getvalue(), "")
+
+    def test_cli_reports_config_errors_and_non_default_warnings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "config.toml"
+            config_path.write_text(
+                """
+[features.multi_agent_v2]
+hide_spawn_agent_metadata = false
+tool_namespace = "agents"
+max_concurrent_threads_per_session = 9
+""".lstrip(),
+                encoding="utf-8",
+            )
+            stderr = io.StringIO()
+
+            with redirect_stderr(stderr):
+                result = validate_main(["--config", str(config_path), str(AGENTS_DIR)])
+
+        self.assertEqual(result, 1)
+        self.assertIn("concurrency must be an integer from 1 to 8", stderr.getvalue())
+
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "config.toml"
+            config_path.write_text(
+                """
+[features.multi_agent_v2]
+hide_spawn_agent_metadata = false
+tool_namespace = "agents"
+max_concurrent_threads_per_session = 3
+""".lstrip(),
+                encoding="utf-8",
+            )
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                result = validate_main(["--config", str(config_path), str(AGENTS_DIR)])
+
+        self.assertEqual(result, 0)
+        self.assertIn("warning:", stderr.getvalue())
+        self.assertIn("concurrency 3", stderr.getvalue())
 
 
 if __name__ == "__main__":

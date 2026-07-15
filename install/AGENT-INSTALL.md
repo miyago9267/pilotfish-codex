@@ -3,6 +3,11 @@
 > This runbook is for a Codex agent installing pilotfish-codex on a user's
 > machine. Follow the steps in order, keep the approval gate, and preserve
 > unrelated Codex configuration.
+>
+> A scripted alternative exists at [install.sh](./install.sh) /
+> [install.py](./install.py) for non-interactive installs. This runbook stays
+> the authoritative merge contract; the script implements the same rules and
+> aborts (exit 2) on any state that needs the human decisions described here.
 
 ## Contents
 
@@ -26,7 +31,7 @@ user's control.
 
 | Target | Change |
 |---|---|
-| `~/.codex/config.toml` | Offer to set `model = "gpt-5.6-sol"`; enable multi-agent support; set a three-leaf, one-generation limit |
+| `~/.codex/config.toml` | Offer to set `model = "gpt-5.6-sol"`; preserve the legacy fallback; install the typed MultiAgentV2 adapter with bounded concurrency |
 | `~/.codex/agents/` | Install `scout`, `plan-verifier`, `security-reviewer`, `mech-executor`, `executor`, `verifier`, and `security-executor` |
 | Active global instruction file | Insert one `### Orchestration` block between `pilotfish-codex:begin` and `pilotfish-codex:end` markers |
 
@@ -83,14 +88,18 @@ considered. Show diffs for customized files before replacing them.
 
 Gather the current state without writing:
 
-1. Run `codex --version`. Require Codex CLI 0.144.1 or newer, the verified
-   baseline for this template schema, GPT-5.6 `max` effort, and multi-agent
-   depth controls. Stop before the write plan if the version is missing, older,
-   or unparsable.
+1. Run `codex --version`. Require Codex CLI 0.144.1 or newer for the base role
+   schema. The MultiAgentV2 adapter is verified on `0.144.4`; on another release
+   treat compatibility as unverified until the live smoke passes. Stop before
+   the write plan if the version is missing, older, or unparsable.
 2. Read `~/.codex/config.toml`. Record `model`,
    `model_reasoning_effort`, `features.multi_agent`,
+   `features.multi_agent_v2.hide_spawn_agent_metadata`,
+   `features.multi_agent_v2.tool_namespace`,
+   `features.multi_agent_v2.max_concurrent_threads_per_session`,
    `agents.max_threads`, and `agents.max_depth`. Preserve every unrelated key
-   and table. Locate the pristine config backup under both supported names:
+   and table. Reject a partial adapter before planning the write. Locate the
+   pristine config backup under both supported names:
    legacy `config.toml.pilotfish-[0-9]*` and current
    `config.toml.pilotfish-codex-*`. Prefer the earliest legacy backup, then the
    earliest current backup, because a legacy backup predates any v1.0.x-owned
@@ -184,11 +193,29 @@ Use [templates/config.snippet.toml](../templates/config.snippet.toml) as the
 canonical values. Perform a TOML-aware key merge; do not append root keys after
 an existing table and do not rewrite unrelated sections.
 
+The temporary adapter is one indivisible table:
+
+```toml
+[features.multi_agent_v2]
+hide_spawn_agent_metadata = false
+tool_namespace = "agents"
+max_concurrent_threads_per_session = 4
+```
+
+Do not set `features.multi_agent_v2.enabled`. Codex can select V2 for a live
+turn independently of local feature-list output, and locally enabling V2
+conflicts with the retained `agents.max_threads` fallback on the verified
+`0.144.4` release. Metadata exposure without the `agents` namespace is invalid
+because the default collaboration namespace uses a reserved server schema.
+
 | Key | Merge rule |
 |---|---|
 | `model` | If absent, set `"gpt-5.6-sol"`. If different, apply the user's approved keep-or-replace choice. |
 | `model_reasoning_effort` | Never set it on a fresh install. For a v1.0.x upgrade, remove root value `"medium"` only when the pristine backup lacked that root key and the user explicitly approved the legacy-pin migration. Otherwise preserve it. |
 | `features.multi_agent` | If absent, set `true`. If `false`, change it only when the approved plan says so. |
+| `features.multi_agent_v2.hide_spawn_agent_metadata` | Set `false` together with the namespace key; never install it alone. |
+| `features.multi_agent_v2.tool_namespace` | Set `"agents"` together with metadata exposure. |
+| `features.multi_agent_v2.max_concurrent_threads_per_session` | If absent, set `4`. Accept an approved integer from 1 through 8; warn that 1 disables child delegation, 2–3 reduce concurrency, and 5–8 raise cost exposure. |
 | `agents.max_threads` | If absent, set `3`, allowing up to three leaf agent threads. If different, change it only when approved. |
 | `agents.max_depth` | If absent, set `1`. If different, change it only when approved; `1` enforces leaf-only delegation. |
 
@@ -253,11 +280,15 @@ validator, which rejects unknown keys and out-of-enum `sandbox_mode`,
 `web_search`, and `model_reasoning_effort` values:
 
 ```bash
-python3 install/validate_agents.py ~/.codex/agents
+python3 install/validate_agents.py \
+  --config ~/.codex/config.toml ~/.codex/agents
 ```
 
 Then confirm the exact name, model, effort, and sandbox defaults match the
 routing table. Confirm `agents.max_threads = 3` and `agents.max_depth = 1`.
+Confirm the V2 concurrency is an integer from 1 through 8; the recommended
+value is 4 active threads including root. Re-run the static validator after any
+merge correction.
 Confirm the active global instruction file has exactly one marker pair and no
 inactive
 global or current project-root candidate retains one. Read back the version
@@ -266,6 +297,17 @@ outcome is the canonical seven-role roster. If the user chose to preserve
 either retired file, report the extra active role and do not claim an exact
 seven-role installation. Re-run the same preflight and confirm every policy
 action is now `skip`; this is the idempotence check.
+
+After static checks pass, offer the explicit quota-spending E2E probe:
+
+```bash
+python3 install/verify_dispatch.py --live --yes
+```
+
+Require `ADAPTER_OK` before claiming that the affected-release transport routes
+a named child to a model different from the parent. `SKIPPED` means the live
+surface remains unverified; `FAILED` is a routing or evidence mismatch and must
+fail closed. Do not run the probe automatically or in CI.
 
 Tell the user to start a fresh Codex session. Agent definitions and global
 instructions are discovered at session start, so an already-running task does
@@ -284,3 +326,11 @@ only the pilotfish-codex-owned keys from that baseline. If no pristine backup
 exists, use the recorded install state to remove only keys that did not exist
 before installation and preserve everything unrelated. Never restore the whole
 backup over a config that may have gained later user changes.
+
+Remove the complete `[features.multi_agent_v2]` adapter only when its keys were
+installed by Pilotfish and still match the template. Preserve customized or
+unrelated keys. For an upstream migration, retain the old table as rollback
+documentation until an adapter-free `--mode native` probe returns `NATIVE_OK`.
+On Codex `0.144.4`, native mode returns
+`SKIPPED: native_schema_introspection_unavailable` before quota or spawning;
+never bypass that gate with a metadata-exposure workaround.
