@@ -17,6 +17,10 @@ are noted only as source references.
   installed role TOML.
 - Isolate the temporary transport so stable native `agent_type` support can
   replace the adapter without changing role TOMLs or semantic policy.
+- Add a scripted install route (`install/install.sh` + `install/install.py`):
+  one-line curl install with a byte-preserving config merge, timestamped
+  backups, idempotent re-runs, and exit-2 aborts on states that need the
+  agent-guided runbook's human decisions.
 
 ## v1.1.0 — 2026-07-15
 

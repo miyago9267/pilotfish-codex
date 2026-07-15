@@ -3,6 +3,11 @@
 > This runbook is for a Codex agent installing pilotfish-codex on a user's
 > machine. Follow the steps in order, keep the approval gate, and preserve
 > unrelated Codex configuration.
+>
+> A scripted alternative exists at [install.sh](./install.sh) /
+> [install.py](./install.py) for non-interactive installs. This runbook stays
+> the authoritative merge contract; the script implements the same rules and
+> aborts (exit 2) on any state that needs the human decisions described here.
 
 ## Contents
 

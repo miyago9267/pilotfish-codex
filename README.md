@@ -69,7 +69,32 @@ The main-session effort remains user-controlled.
 
 ## Install
 
-> Requires Codex CLI 0.144.1 or newer.
+> Requires Codex CLI 0.144.1 or newer and Python 3.11+.
+
+Both routes install the same files and keep timestamped backups of anything
+they replace. After either route, start a **new** Codex session — a running
+session keeps the old spawn schema.
+
+### Route 1 — one-line script
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/miyago9267/pilotfish-codex/main/install/install.sh | bash
+```
+
+Non-interactive and idempotent: it merges only the managed keys into
+`~/.codex/config.toml` (unrelated keys, comments, and formatting survive byte
+for byte), installs the seven role TOMLs, and replaces the marked
+orchestration block. Preview with `... | bash -s -- --dry-run`. Anything that
+needs a human decision (an explicit `multi_agent = false`, a forced
+`multi_agent_v2.enabled = true`, unmatched markers) aborts without writing —
+use Route 2 for those. Pin a version by replacing `main` in the URL and
+setting the same ref in `PILOTFISH_REF`:
+
+```bash
+PILOTFISH_REF=<tag-or-sha> curl -fsSL https://raw.githubusercontent.com/miyago9267/pilotfish-codex/<tag-or-sha>/install/install.sh | bash
+```
+
+### Route 2 — agent-guided install prompt
 
 Paste this into a Codex CLI session:
 
@@ -78,13 +103,10 @@ Read https://raw.githubusercontent.com/miyago9267/pilotfish-codex/main/install/A
 ```
 
 The agent will read the runbook, show you a plan of every change, and wait for
-your approval before writing anything. The whole process takes about a minute.
-
-To pin to a specific version (recommended for teams):
-
-```text
-Read https://raw.githubusercontent.com/miyago9267/pilotfish-codex/<commit-sha>/install/AGENT-INSTALL.md and follow it to install pilotfish-codex into my global Codex configuration.
-```
+your approval before writing anything. This route also handles v1.0.x
+migrations and any state the script refuses to decide. To pin to a specific
+version (recommended for teams), replace `main` with a tag or commit SHA in
+the URL.
 
 ## What gets installed
 
