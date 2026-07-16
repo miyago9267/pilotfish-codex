@@ -437,6 +437,13 @@ def inspect_dispatch(
             parent_thread_id=parent_id,
             parent_model=parent_model,
         )
+    if "service_tier" in arguments:
+        return _verdict(
+            "FAILED",
+            "service_tier_override_forbidden",
+            parent_thread_id=parent_id,
+            parent_model=parent_model,
+        )
     if arguments.get("agent_type") != "scout":
         return _verdict(
             "FAILED",

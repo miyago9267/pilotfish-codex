@@ -5,6 +5,23 @@ the policy block in `AGENTS.md` (`<!-- pilotfish-codex vX.Y.Z -->`).
 pilotfish-codex uses its own semantic versioning; upstream pilotfish versions
 are noted only as source references.
 
+## v1.2.1 — 2026-07-16
+
+### English
+
+- Tell named-role subagents not to request their own `service_tier`, and make
+  the dispatch verifier reject any recorded child-level override.
+- Keep parent Fast-mode inheritance unchanged. Do not install a hook that
+  cannot actually stop the spawn call; hard runtime blocking still depends on
+  upstream Codex support.
+
+### 中文
+
+- 要求 named-role 子代理不要自行指定 `service_tier`，並讓 dispatch
+  verifier 拒絕任何記錄到的 child-level override。
+- 保留 parent Fast mode 的既有繼承行為。不安裝無法真正阻止 spawn call
+  的 hook；runtime hard block 仍需等待上游 Codex 支援。
+
 ## v1.2.0 — 2026-07-15
 
 - Add the three-key MultiAgentV2 compatibility adapter so named roles remain

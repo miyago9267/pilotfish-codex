@@ -65,6 +65,8 @@ class PolicyTests(unittest.TestCase):
         self.assertIn('`fork_turns = "none"`', policy)
         self.assertIn('positive integer string from `"1"` through `"3"`', policy)
         self.assertIn("Never retry the task with an untyped child", policy)
+        self.assertRegex(policy, r"Do not pass a\s+`service_tier` override")
+        self.assertRegex(policy, r"inherited from the\s+parent session")
         self.assertRegex(policy, r"fail\s+closed")
         self.assertNotIn('fork_turns = "all"', policy)
 
