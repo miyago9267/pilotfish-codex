@@ -21,9 +21,10 @@ attribution and maintains the Codex-specific adaptation: TOML role agents, an
 `AGENTS.md` orchestration policy, and an installer for `~/.codex/`. See the
 [Codex design mapping](./docs/design.md) for the adaptation boundary.
 
-v1.2.0 adds cost-safe MultiAgentV2 compatibility and live named-role dispatch
-proof. Remora 0.1.10 remains the reference only for the GPT-5.6 model and
-reasoning-effort bindings shared by the seven Codex roles.
+v1.2.1 adds a policy rule against child-only service-tier overrides and makes
+the dispatch verifier reject recorded overrides. Remora 0.1.10 remains the
+reference only for the GPT-5.6 model and reasoning-effort bindings shared by
+the seven Codex roles.
 
 > **Codex-specific boundary:** The Claude-only `Explore` override is
 > intentionally not installed. Pilotfish uses that exact name to shadow Claude
@@ -150,9 +151,11 @@ including root. Pilotfish accepts values from 1 through 8, warns outside the
 recommended value, and treats 1 as child delegation disabled.
 
 The policy calls `agents.spawn_agent` with `agent_type`, a lowercase task name,
-and explicit bounded context. If typed role routing is unavailable, it must
-fail closed instead of retrying an untyped inherited-model child. Start a fresh
-Codex session after changing the config or installed roles.
+and explicit bounded context, without a child-level `service_tier` override. A
+Fast tier deliberately selected for the parent may still be inherited by the
+child. If typed role routing is unavailable, the policy must fail closed
+instead of retrying an untyped inherited-model child. Start a fresh Codex
+session after changing the config or installed roles.
 
 Static validation proves the installed config and role files are internally
 consistent:
@@ -173,10 +176,13 @@ python3 install/verify_dispatch.py --live --yes
 `ADAPTER_OK` proves the temporary transport. `NATIVE_OK` is reserved for an
 adapter-free native probe. `SKIPPED` names an unavailable prerequisite;
 `FAILED` means routing evidence was missing or mismatched and prints a
-cost-safety warning to stop named-role delegation. A future stable Codex
-release may retire the schema workaround only after this command with `--mode
-native` returns `NATIVE_OK`; role TOMLs and semantic policy remain unchanged.
-The current verifier returns
+cost-safety warning to stop named-role delegation. An explicit `service_tier`
+in the recorded spawn arguments is a failure. This is evidence validation, not
+a runtime block: Pilotfish does not install a hook because current
+`PreToolUse` hooks cannot cancel the tool call. A future stable Codex release
+may retire the schema workaround only after this command with `--mode native`
+returns `NATIVE_OK`; role TOMLs and semantic policy remain unchanged. The
+current verifier returns
 `SKIPPED: native_schema_introspection_unavailable` before quota or spawning,
 because Codex `0.144.4` has no safe adapter-free schema introspection surface.
 

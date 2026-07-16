@@ -168,6 +168,26 @@ class DispatchEvidenceTests(unittest.TestCase):
                 self.assertEqual(verdict.status, "FAILED")
                 self.assertEqual(verdict.reason, reason)
 
+    def test_explicit_service_tier_override_fails_closed(self) -> None:
+        for service_tier in ("fast", "default", "", None):
+            with self.subTest(service_tier=service_tier):
+                events = parent_events()
+                arguments = json.loads(events[2]["payload"]["arguments"])
+                arguments["service_tier"] = service_tier
+                events[2]["payload"]["arguments"] = json.dumps(arguments)
+                verdict = inspect_dispatch(
+                    events,
+                    child_events(),
+                    expected_role=self.binding,
+                    expected_namespace="agents",
+                )
+
+                self.assertEqual(verdict.status, "FAILED")
+                self.assertEqual(
+                    verdict.reason,
+                    "service_tier_override_forbidden",
+                )
+
     def test_missing_ambiguous_or_invalid_spawn_evidence_fails_closed(self) -> None:
         missing_activity = parent_events()[:-1]
         duplicate_spawn = parent_events()

@@ -1,5 +1,5 @@
 <!-- pilotfish-codex:begin -->
-<!-- pilotfish-codex v1.2.0 -->
+<!-- pilotfish-codex v1.2.1 -->
 <!-- markdownlint-disable-next-line MD041 -->
 ### Orchestration
 
@@ -87,7 +87,10 @@ default is sufficient.
 If the `agents` namespace, `agent_type`, or installed role is unavailable, fail
 closed. Never retry the task with an untyped child because it can inherit the
 orchestrator model. Do not pass model or reasoning-effort overrides for an
-installed named role; its TOML remains authoritative.
+installed named role; its TOML remains authoritative. Do not pass a
+`service_tier` override. Omitting it prevents child-only tier escalation but
+does not downgrade a tier deliberately selected for and inherited from the
+parent session.
 <!-- pilotfish-codex:spawn-transport:end -->
 
 Brief each worker in one shot with the goal, constraints, done criteria,
