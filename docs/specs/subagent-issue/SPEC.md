@@ -4,7 +4,7 @@
 - Status: Complete
 - Owner: Miyago
 - Created: 2026-07-15
-- Updated: 2026-07-15
+- Updated: 2026-07-16
 - Supersedes: `subagent-issue-claude`, `subagent-issue-codex`
 - Upstream: [openai/codex#31814](https://github.com/openai/codex/issues/31814),
   [#32031](https://github.com/openai/codex/issues/32031),
@@ -93,6 +93,32 @@ currently:
 - PR #32749 adds direct model and effort overrides in the `0.145` alpha line,
   but does not expose `agent_type` by default. Direct model selection does not
   restore role instructions, sandbox settings, or a complete named-role route.
+
+### Upstream tracking (agent_type native support)
+
+Status as of 2026-07-16; re-check on every Codex CLI upgrade alongside
+`verify_dispatch.py --live`.
+
+- Issue openai/codex#31814 (Sol cannot specify subagent models) was closed by
+  jif-oai on 2026-07-15. His
+  [follow-up comment](https://github.com/openai/codex/issues/31814#issuecomment-4981436324)
+  commits to a dedicated sub-agent configuration file in a follow-up PR and
+  warns that explicit routing may cost global performance versus letting 5.6
+  models self-manage subagents. The comment names no PR, release, or
+  `agent_type` schema contract — treat it as an implementation signal, not
+  proof of native named-role support.
+- PR #32751 (merged 2026-07-13) restricts spawned-agent models to the active
+  backend — upstream now owns part of the guard our service-tier hook covers.
+- PR #33550 (merged 2026-07-16) unifies multi-agent settings under `[agents]`:
+  adds `agents.enabled` as user override, renames the limit key to
+  `agents.max_concurrent_threads_per_session` with `agents.max_threads` kept as
+  an alias (the 0.144.4 rejection noted above no longer applies there), and adds
+  **reserved** subagent model, reasoning-effort, and agent-type settings to the
+  config surface, persisted in config locks. Reserved means present in schema
+  but not yet an active native named-role selector.
+- Migration trigger remains the native migration contract below: act when a
+  stable release *activates* the reserved `agents` agent-type settings, not on
+  schema presence alone.
 
 ## Requirements
 
