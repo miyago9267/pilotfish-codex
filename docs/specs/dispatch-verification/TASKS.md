@@ -18,7 +18,27 @@ Implementation ownership moved to `docs/specs/subagent-issue/`.
 
 ## Deferred behavior evaluation
 
-- [ ] C1. Design a task-class evaluation only if Pilotfish later claims that
-      every orchestrator judgment is mechanically enforced.
+- [x] C1. Add a task-class selection and abstention evaluator while explicitly
+      documenting that it measures behavior and does not mechanically enforce
+      every orchestrator judgment.
 - [ ] C2. Reconsider a hard runtime hook only when Codex exposes a stable event
       containing the effective child role, model, and effort before execution.
+
+## Evidence expansion batch
+
+- [x] D1. Define and document receipt schema v1, redaction rules, bounded
+      `route_observation` values, and receipt failure semantics.
+- [x] D2. Add atomic redacted JSON receipts and precise valid-no-spawn
+      post-hoc classification without claiming fallback executor identity.
+- [x] D3. Parameterize explicit probes by packaged role and add the sequential
+      seven-role matrix with preflight, per-role receipts, and aggregate result.
+- [x] D4. Run two same-version live probes to discover terminal event schema;
+      keep terminal proof disabled because explicit status, error/cancellation,
+      and close semantics were not established.
+- [x] D5. Add the versioned task-class corpus and offline
+      selection/abstention evaluator with an opt-in live runner.
+- [x] D6. Add synthetic receipt, role-matrix, terminal-gate, and evaluator
+      regression tests; update user documentation and release notes.
+- [x] D7. Keep native `NATIVE_OK`, pre-execution hard blocking, hidden
+      effective-role metadata, and unsupported lifecycle guarantees deferred to
+      upstream capability.

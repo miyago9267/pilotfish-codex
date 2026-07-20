@@ -21,10 +21,13 @@ attribution and maintains the Codex-specific adaptation: TOML role agents, an
 `AGENTS.md` orchestration policy, and an installer for `~/.codex/`. See the
 [Codex design mapping](./docs/design.md) for the adaptation boundary.
 
-v1.2.1 adds a policy rule against child-only service-tier overrides and makes
-the dispatch verifier reject recorded overrides. Remora 0.1.10 remains the
-reference only for the GPT-5.6 model and reasoning-effort bindings shared by
-the seven Codex roles.
+v1.3.0 adds redacted dispatch receipts, explicit role-aware verification, a
+seven-role binding matrix, and a task-class selection/abstention evaluator.
+Terminal proof remains gated on a stable observed rollout schema. Native
+adapter-free routing, hard pre-execution blocking, and hidden effective-role
+metadata remain upstream-dependent. Remora 0.1.10 remains the reference only
+for the GPT-5.6 model and reasoning-effort bindings shared by the seven Codex
+roles.
 
 > **Codex-specific boundary:** The Claude-only `Explore` override is
 > intentionally not installed. Pilotfish uses that exact name to shadow Claude
@@ -185,6 +188,32 @@ returns `NATIVE_OK`; role TOMLs and semantic policy remain unchanged. The
 current verifier returns
 `SKIPPED: native_schema_introspection_unavailable` before quota or spawning,
 because Codex `0.144.4` has no safe adapter-free schema introspection surface.
+
+The verifier's evidence-expansion options are manual and quota-gated:
+
+```bash
+# One explicit role; scout remains the default.
+python3 install/verify_dispatch.py --live --yes \
+  --role scout --receipt ~/.codex/dispatch-receipts/scout.json
+
+# Sequential explicit-binding matrix; up to seven parent/child probes.
+python3 install/verify_dispatch.py --live --yes \
+  --all-roles --matrix-yes --receipt-dir ~/.codex/dispatch-receipts
+
+# Offline behavioral task-class selection evaluation.
+python3 install/evaluate_dispatch.py --decisions decisions.json
+
+# Manual live evaluation; case cap and no-tool output are enforced.
+python3 install/evaluate_dispatch.py --live --yes --task-eval-yes \
+  --case-id independent_read_only_discovery
+```
+
+Receipts are versioned, redacted JSON observations. They may contain hashes,
+thread IDs, relative rollout references, model/effort fields, and verdicts; they
+do not contain prompts, responses, rollout contents, developer instructions,
+raw process output, or absolute home paths. A receipt is an evidence artifact,
+not a runtime guard. Native routing, hard pre-execution blocking, and hidden
+effective-role metadata remain upstream-dependent.
 
 ## Updating
 

@@ -309,6 +309,28 @@ a named child to a model different from the parent. `SKIPPED` means the live
 surface remains unverified; `FAILED` is a routing or evidence mismatch and must
 fail closed. Do not run the probe automatically or in CI.
 
+The evidence-expansion commands are also manual and quota-spending:
+
+```bash
+# Explicit role with a redacted JSON receipt.
+python3 install/verify_dispatch.py --live --yes \
+  --role scout --receipt ~/.codex/dispatch-receipts/scout.json
+
+# Sequential seven-role binding matrix.
+python3 install/verify_dispatch.py --live --yes \
+  --all-roles --matrix-yes --receipt-dir ~/.codex/dispatch-receipts
+
+# Offline task-class selection/abstention scoring.
+python3 install/evaluate_dispatch.py --decisions decisions.json
+```
+
+Receipts are redacted evidence artifacts, not runtime guards. They may retain
+hashes, IDs, relative rollout references, model/effort, and verdict metadata;
+they must not retain prompts, responses, rollout contents, developer
+instructions, raw process output, or absolute home paths. The seven-role matrix
+proves explicit binding only. Native routing, pre-execution blocking, and hidden
+effective-role metadata remain upstream-dependent.
+
 Tell the user to start a fresh Codex session. Agent definitions and global
 instructions are discovered at session start, so an already-running task does
 not prove the new install. Summarize changes, skips, approved overwrites,

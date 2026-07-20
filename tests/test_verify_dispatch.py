@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-import json
+import argparse
+import hashlib
 import io
+import json
 import shutil
+import stat
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
@@ -13,8 +17,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "install"))
 
+import verify_dispatch  # noqa: E402
 from verify_dispatch import (  # noqa: E402
     EvidenceError,
+    LiveEvidence,
+    ReceiptError,
     RoleBinding,
     build_codex_command,
     candidate_day_directories,
@@ -25,7 +32,11 @@ from verify_dispatch import (  # noqa: E402
     locate_rollout,
     main as verify_main,
     parse_exec_thread_id,
+    prepare_receipt_destination,
     read_role_binding,
+    receipt_payload,
+    task_name_for_role,
+    write_receipt,
 )
 
 
@@ -667,6 +678,198 @@ class DispatchRolloutLocationTests(unittest.TestCase):
             extract_child_thread_id(ambiguous)
 
 
+class DispatchReceiptTests(unittest.TestCase):
+    def test_receipt_is_private_atomic_redacted_and_hashes_relative_rollouts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            rollout = home / "sessions" / "2026" / "07" / "20" / "parent.jsonl"
+            rollout.parent.mkdir(parents=True)
+            raw_evidence = b'{"prompt":"secret /absolute/path"}\n'
+            rollout.write_bytes(raw_evidence)
+            destination = prepare_receipt_destination(
+                codex_home=home, role="scout", receipt=Path("proof.json")
+            )
+            verdict = verify_dispatch._verdict(
+                "FAILED", "rollout_evidence_invalid", route_observation="not_observed"
+            )
+            payload = receipt_payload(
+                role="scout",
+                verdict=verdict,
+                sessions_root=home / "sessions",
+                evidence=LiveEvidence(parent_rollout=rollout),
+            )
+            receipt = write_receipt(destination, payload)
+
+            saved = json.loads(receipt.read_text(encoding="utf-8"))
+            self.assertEqual(saved["schema_version"], 1)
+            self.assertEqual(saved["version"], 1)
+            self.assertEqual(saved["schema"], "dispatch-receipt/v1")
+            self.assertIn("started_at_utc", saved["timestamps"])
+            self.assertIn("ended_at_utc", saved["timestamps"])
+            self.assertIn("repository_version", saved["tool"])
+            self.assertIn("codex_version", saved["tool"])
+            self.assertEqual(saved["request"]["role"], "scout")
+            self.assertIn("template_role_sha256", saved["preflight"])
+            self.assertIn("route_observation", saved["observation"])
+            self.assertIn("exit_code", saved["verdict"])
+            self.assertEqual(saved["rollouts"]["parent"]["ref"], "2026/07/20/parent.jsonl")
+            self.assertEqual(
+                saved["rollouts"]["parent"]["sha256"],
+                hashlib.sha256(raw_evidence).hexdigest(),
+            )
+            serialized = json.dumps(saved)
+            self.assertNotIn("secret", serialized)
+            self.assertNotIn("/absolute/path", serialized)
+            self.assertNotIn(str(home), serialized)
+            self.assertEqual(stat.S_IMODE(receipt.stat().st_mode), 0o600)
+            self.assertEqual(
+                stat.S_IMODE((home / "dispatch-receipts").stat().st_mode), 0o700
+            )
+
+    def test_receipt_never_overwrites_and_rejects_escape_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            destination = prepare_receipt_destination(
+                codex_home=home, role="scout", receipt=Path("proof.json")
+            )
+            write_receipt(destination, {"version": 1})
+            with self.assertRaises(ReceiptError):
+                write_receipt(destination, {"version": 1})
+            with self.assertRaises(ReceiptError):
+                prepare_receipt_destination(
+                    codex_home=home, role="scout", receipt=Path("../escape.json")
+                )
+
+    def test_receipt_failure_downgrades_adapter_success(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = prepare_receipt_destination(
+                codex_home=Path(directory), role="scout", receipt=Path("proof.json")
+            )
+            args = argparse.Namespace(codex_home=Path(directory))
+            success = verify_dispatch._verdict("ADAPTER_OK", "verified_distinct_model")
+            with patch.object(
+                verify_dispatch, "write_receipt", side_effect=ReceiptError("blocked")
+            ), redirect_stderr(io.StringIO()):
+                verdict = verify_dispatch._write_role_receipt(
+                    args=args,
+                    role="scout",
+                    verdict=success,
+                    evidence=LiveEvidence(),
+                    destination=destination,
+                )
+            self.assertEqual((verdict.status, verdict.reason), ("FAILED", "receipt_write_failed"))
+
+    def test_no_typed_spawn_is_classified_only_after_valid_parent_evidence(self) -> None:
+        events = parent_events()[:2]
+        verdict = inspect_dispatch(
+            events,
+            [],
+            expected_role=RoleBinding(model="gpt-5.6-luna", effort="low"),
+            expected_namespace="agents",
+        )
+        self.assertEqual(
+            (verdict.status, verdict.reason, verdict.route_observation),
+            ("FAILED", "requested_role_not_executed", "requested_role_not_executed"),
+        )
+
+        malformed = events + [{"type": "response_item", "payload": None}]
+        verdict = inspect_dispatch(
+            malformed,
+            [],
+            expected_role=RoleBinding(model="gpt-5.6-luna", effort="low"),
+            expected_namespace="agents",
+        )
+        self.assertEqual((verdict.status, verdict.reason), ("FAILED", "parent_evidence_invalid"))
+
+    def test_role_and_task_are_parameterized_consistently(self) -> None:
+        role = "security-executor"
+        task_name = task_name_for_role(role)
+        command = build_codex_command(
+            codex_bin="codex",
+            cwd=ROOT,
+            mode="adapter",
+            parent_model="gpt-5.6-terra",
+            role=role,
+            task_name=task_name,
+        )
+        self.assertIn(f"agent_type='{role}'", command[-1])
+        self.assertIn(f"task_name='{task_name}'", command[-1])
+
+        events = parent_events()
+        arguments = json.loads(events[2]["payload"]["arguments"])
+        arguments.update({"agent_type": role, "task_name": task_name})
+        events[2]["payload"]["arguments"] = json.dumps(arguments)
+        events[3]["payload"]["agent_path"] = f"/root/{task_name}"
+        verdict = inspect_dispatch(
+            events,
+            child_events(),
+            expected_role=RoleBinding(model="gpt-5.6-luna", effort="low"),
+            expected_namespace="agents",
+            expected_role_name=role,
+            expected_task_name=task_name,
+        )
+        self.assertEqual(verdict.status, "ADAPTER_OK")
+
+    def test_matrix_aggregates_seven_role_receipts_without_live_codex(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            args = argparse.Namespace(
+                codex_bin="never-run",
+                codex_home=home,
+                repository_root=ROOT,
+                mode="adapter",
+                parent_model="gpt-5.6-terra",
+                receipt_dir=None,
+            )
+            destinations = {
+                role: prepare_receipt_destination(codex_home=home, role=role)
+                for role in verify_dispatch.ROLE_NAMES
+            }
+            binding = RoleBinding(model="gpt-5.6-luna", effort="low")
+            success = verify_dispatch._verdict("ADAPTER_OK", "verified_distinct_model")
+            with patch.object(verify_dispatch, "_preflight", return_value=(binding, None)), patch.object(
+                verify_dispatch, "_execute_live", return_value=(success, LiveEvidence())
+            ):
+                verdict = verify_dispatch._run_matrix(args, destinations)
+
+            self.assertEqual((verdict.status, verdict.reason), ("ADAPTER_OK", "matrix_verified_all_roles"))
+            receipts = list((home / "dispatch-receipts").glob("*.json"))
+            self.assertEqual(len(receipts), len(verify_dispatch.ROLE_NAMES) + 1)
+
+    def test_matrix_preflights_all_roles_then_stops_at_first_probe_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            args = argparse.Namespace(
+                codex_bin="never-run",
+                codex_home=home,
+                repository_root=ROOT,
+                mode="adapter",
+                parent_model="gpt-5.6-terra",
+                receipt_dir=None,
+            )
+            destinations = {
+                role: prepare_receipt_destination(codex_home=home, role=role)
+                for role in verify_dispatch.ROLE_NAMES
+            }
+            binding = RoleBinding(model="gpt-5.6-luna", effort="low")
+            success = verify_dispatch._verdict("ADAPTER_OK", "verified_distinct_model")
+            failure = verify_dispatch._verdict("FAILED", "child_model_mismatch")
+            with patch.object(
+                verify_dispatch, "_preflight", return_value=(binding, None)
+            ) as preflight, patch.object(
+                verify_dispatch,
+                "_execute_live",
+                side_effect=[(success, LiveEvidence()), (failure, LiveEvidence())],
+            ) as execute:
+                verdict = verify_dispatch._run_matrix(args, destinations)
+
+            self.assertEqual((verdict.status, verdict.reason), ("FAILED", "matrix_role_failed"))
+            self.assertEqual(preflight.call_count, len(verify_dispatch.ROLE_NAMES))
+            self.assertEqual(execute.call_count, 2)
+            manifest = next((home / "dispatch-receipts").glob("dispatch-matrix-*.json"))
+            self.assertEqual(len(json.loads(manifest.read_text())["roles"]), len(verify_dispatch.ROLE_NAMES))
+
+
 class DispatchLiveContractTests(unittest.TestCase):
     def test_role_binding_reads_only_model_and_effort(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -746,6 +949,51 @@ developer_instructions = "ignored by binding reader"
             "SKIPPED reason=native_schema_introspection_unavailable",
             stdout.getvalue(),
         )
+        self.assertNotIn("spends real model quota", stderr.getvalue())
+
+    def test_native_skip_precedes_receipt_destination_validation(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            result = verify_main(
+                [
+                    "--live",
+                    "--yes",
+                    "--mode",
+                    "native",
+                    "--receipt",
+                    "/tmp/outside.json",
+                    "--codex-bin",
+                    "must-not-be-called",
+                ]
+            )
+        self.assertEqual(result, 2)
+        self.assertEqual(
+            stdout.getvalue().strip(),
+            "SKIPPED reason=native_schema_introspection_unavailable",
+        )
+        self.assertNotIn("receipt destination failed", stderr.getvalue())
+
+    def test_destination_failure_stops_before_preflight_or_quota(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with tempfile.TemporaryDirectory() as directory:
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                result = verify_main(
+                    [
+                        "--live",
+                        "--yes",
+                        "--codex-home",
+                        directory,
+                        "--receipt",
+                        "/tmp/outside.json",
+                        "--codex-bin",
+                        "must-not-be-called",
+                    ]
+                )
+        self.assertEqual(result, 1)
+        self.assertEqual(stdout.getvalue().strip(), "FAILED reason=receipt_destination_invalid")
+        self.assertIn("receipt destination failed:", stderr.getvalue())
         self.assertNotIn("spends real model quota", stderr.getvalue())
 
     def test_failed_preflight_prints_cost_safety_warning(self) -> None:

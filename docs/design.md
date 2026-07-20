@@ -85,6 +85,16 @@ Until Codex exposes safe adapter-free spawn-schema introspection, native mode
 returns `SKIPPED` before quota or child creation instead of risking an untyped
 probe.
 
+Evidence expansion is layered separately from routing ownership:
+
+- receipts preserve observed evidence and never assert hidden runtime fields;
+- explicit role matrices prove binding per role, not automatic role selection;
+- terminal proof is enabled only after two same-version probes establish stable
+  lifecycle events;
+- task-class evaluation measures selection and abstention, not enforcement;
+- pre-execution blocking and authoritative effective-role metadata remain
+  upstream responsibilities.
+
 ## Seven Codex roles
 
 The Codex roster is the smallest non-overlapping projection of the current

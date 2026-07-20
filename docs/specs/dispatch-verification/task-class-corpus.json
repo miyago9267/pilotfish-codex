@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "description": "Behavioral task-class routing corpus; it evaluates policy judgments and does not enforce runtime dispatch.",
+  "cases": [
+    {
+      "id": "discovery-bounded-reconnaissance",
+      "prompt": "Inspect the authentication and billing modules independently, returning only file-backed findings and a stop condition for each surface.",
+      "policy_basis": [
+        "templates/agents-md.orchestration.md",
+        "templates/agents/scout.toml"
+      ],
+      "expected": {"decision": "delegate", "role": "scout"}
+    },
+    {
+      "id": "plan-readiness-challenge",
+      "prompt": "Challenge this material, pre-approval migration plan and return only READY or REVISE with missing assumptions.",
+      "policy_basis": [
+        "templates/agents-md.orchestration.md",
+        "templates/agents/plan-verifier.toml"
+      ],
+      "expected": {"decision": "delegate", "role": "plan-verifier"}
+    },
+    {
+      "id": "preapproval-security-evidence",
+      "prompt": "Before approval, inspect the proposed token-rotation design for security evidence; do not modify source files.",
+      "policy_basis": [
+        "templates/agents-md.orchestration.md",
+        "templates/agents/security-reviewer.toml"
+      ],
+      "expected": {"decision": "delegate", "role": "security-reviewer"}
+    },
+    {
+      "id": "specified-mechanical-edit",
+      "prompt": "Apply this complete, approved rename specification across the listed files, update the prescribed tests, and run the named command.",
+      "policy_basis": [
+        "templates/agents-md.orchestration.md",
+        "templates/agents/mech-executor.toml"
+      ],
+      "expected": {"decision": "delegate", "role": "mech-executor"}
+    },
+    {
+      "id": "bounded-implementation-judgment",
+      "prompt": "Implement the approved bounded API feature with its done criteria, making the necessary local engineering choices.",
+      "policy_basis": [
+        "templates/agents-md.orchestration.md",
+        "templates/agents/executor.toml"
+      ],
+      "expected": {"decision": "delegate", "role": "executor"}
+    },
+    {
+      "id": "completed-outcome-refutation",
+      "prompt": "Independently attempt to refute this completed non-trivial change by reproducing its tests and return only CONFIRMED or REFUTED.",
+      "policy_basis": [
+        "templates/agents-md.orchestration.md",
+        "templates/agents/verifier.toml"
+      ],
+      "expected": {"decision": "delegate", "role": "verifier"}
+    },
+    {
+      "id": "approved-security-implementation",
+      "prompt": "Implement the approved authorization hardening contract after its security review, including the specified verification.",
+      "policy_basis": [
+        "templates/agents-md.orchestration.md",
+        "templates/agents/security-executor.toml"
+      ],
+      "expected": {"decision": "delegate", "role": "security-executor"}
+    },
+    {
+      "id": "small-local-stable-edit",
+      "prompt": "Correct the already-understood typo in one local README paragraph.",
+      "policy_basis": [
+        "templates/agents-md.orchestration.md"
+      ],
+      "expected": {"decision": "local", "role": null}
+    },
+    {
+      "id": "single-unknown-bug",
+      "prompt": "Trace and minimally fix one unknown bug whose diagnosis, state propagation, and verification share the same code path.",
+      "policy_basis": [
+        "templates/agents-md.orchestration.md"
+      ],
+      "expected": {"decision": "local", "role": null}
+    }
+  ]
+}

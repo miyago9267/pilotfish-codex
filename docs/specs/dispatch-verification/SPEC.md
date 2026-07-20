@@ -49,7 +49,38 @@ hook with the effective child binding.
   routing mismatch.
 - Keep normal tests offline and bounded to synthetic JSONL evidence.
 
+## Evidence expansion contract
+
+The verifier enhancement adds locally auditable evidence without claiming
+runtime enforcement:
+
+- Live adapter attempts may emit a versioned, redacted JSON receipt.
+- Receipts record observed evidence only. They must not claim
+  `effective_executor=parent`, capability availability, or hidden runtime role
+  fields without upstream metadata.
+- `route_observation` is limited to `not_attempted`, `not_observed`,
+  `requested_role_not_executed`, `typed_child_observed`, and
+  `typed_child_verified`.
+- A structurally valid parent rollout with no expected typed spawn reports
+  `FAILED: requested_role_not_executed`; malformed or unavailable evidence
+  remains an evidence failure.
+- Explicit probes may be parameterized across all seven installed roles and
+  aggregated sequentially. This proves explicit binding only, not automatic
+  task-class selection or complete capability application.
+- A terminal-outcome proof path is conditional on a stable, observed Codex
+  lifecycle event schema. Missing schema keeps `terminal_outcome=unverified`.
+- A separate task-class evaluator scores delegation selection and abstention;
+  it is a behavioral evaluation, not a runtime guarantee.
+
+The following remain upstream-dependent and outside local proof:
+
+- adapter-free native `NATIVE_OK` evidence;
+- a cancellable pre-execution dispatch hook;
+- authoritative effective-role and hidden capability metadata;
+- lifecycle guarantees absent from Codex rollout events.
+
 ## Acceptance
 
-`TESTS.md` records the reconciled mechanism-proof contract. Broader task-class
-selection evaluation remains a future project.
+`TESTS.md` records both the reconciled mechanism-proof contract and the
+local evidence-expansion contract. Native migration, hard runtime blocking,
+and hidden effective-role claims remain explicitly unproven.

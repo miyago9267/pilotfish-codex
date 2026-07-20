@@ -5,6 +5,19 @@ the policy block in `AGENTS.md` (`<!-- pilotfish-codex vX.Y.Z -->`).
 pilotfish-codex uses its own semantic versioning; upstream pilotfish versions
 are noted only as source references.
 
+## v1.3.0 — 2026-07-20
+
+- Add redacted versioned dispatch receipts with atomic writes, path and hash
+  boundaries, and explicit post-hoc route observations.
+- Parameterize explicit role verification and add a manual sequential matrix for
+  all seven installed roles.
+- Add a versioned task-class evaluator for delegation selection and abstention;
+  this remains a behavioral score, not runtime enforcement.
+- Keep terminal proof schema-gated and preserve the native
+  `native_schema_introspection_unavailable` safe skip.
+- Document upstream blockers for native routing, hard pre-execution blocking,
+  hidden effective-role metadata, and unsupported lifecycle guarantees.
+
 ## v1.2.1 — 2026-07-16
 
 ### English
