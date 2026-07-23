@@ -214,20 +214,6 @@ class InstructionMergeTest(unittest.TestCase):
         with self.assertRaises(InstallAbort):
             merge_instruction_text(doubled, POLICY_BLOCK)
 
-    def test_installed_policy_keeps_plan_readiness_contract(self) -> None:
-        text, action = merge_instruction_text("", POLICY_BLOCK)
-
-        self.assertEqual(action, "appended")
-        self.assertIn("`READY` must be the entire response", text)
-        self.assertIn("`REVISE` is never a bare response", text)
-        self.assertIn("stable readiness-unit ID", text)
-        self.assertIn("pause only that unit", text)
-        self.assertRegex(
-            text,
-            r"finish the read-only\s+`security-reviewer`",
-        )
-        self.assertIn("never user approval", text)
-
 
 class EndToEndTempHomeTest(unittest.TestCase):
     def _run(self, home: Path, dry_run: bool = False) -> int:

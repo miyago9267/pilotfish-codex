@@ -64,6 +64,17 @@ class TemplateContractTests(unittest.TestCase):
 
         self.assertIn("READY", plan["developer_instructions"])
         self.assertIn("REVISE", plan["developer_instructions"])
+        for field in (
+            "Blocker:",
+            "Evidence:",
+            "Minimum revision:",
+            "Acceptance check:",
+        ):
+            self.assertIn(field, plan["developer_instructions"])
+        self.assertIn(
+            "completed security-reviewer findings",
+            plan["developer_instructions"],
+        )
         self.assertNotIn("CONFIRMED", plan["developer_instructions"])
         self.assertNotIn("REFUTED", plan["developer_instructions"])
 
@@ -75,61 +86,6 @@ class TemplateContractTests(unittest.TestCase):
         self.assertEqual(security_review["web_search"], "live")
         self.assertIn("approved implementation", security_review["developer_instructions"])
         self.assertIn("pre-approval evidence", security_execute["developer_instructions"])
-
-    def test_plan_verifier_prompt_matches_readiness_protocol(self) -> None:
-        plan = load_toml(AGENTS_DIR / "plan-verifier.toml")
-        prompt = plan["developer_instructions"]
-
-        self.assertIn("bare word READY", prompt)
-        self.assertRegex(prompt, r"READY must be the complete\s+response")
-        self.assertIn("never a bare REVISE", prompt)
-        self.assertIn("first output bytes must be READY or REVISE", prompt)
-        for field in (
-            "Blocker",
-            "Evidence",
-            "Minimum revision",
-            "Acceptance check",
-        ):
-            self.assertIn(field, prompt)
-        self.assertIn("explicit evidence gap", prompt)
-        for label in (
-            "Blocker: ...",
-            "Evidence:",
-            "Minimum revision: ...",
-            "Acceptance check: ...",
-        ):
-            self.assertIn(label, prompt)
-        self.assertIn("stable ID", prompt)
-        self.assertIn("program envelope", prompt)
-        self.assertIn("Review exactly one", prompt)
-        self.assertIn("Never review both in one call", prompt)
-        self.assertIn("envelope already received `READY`", prompt)
-        self.assertRegex(
-            prompt,
-            r"cross-cutting\s+architecture/security/privacy",
-        )
-        self.assertIn("cosmetic fragmentation", prompt)
-        self.assertIn("Plan epoch", prompt)
-        self.assertRegex(prompt, r"automatic\s+REVISE count")
-        self.assertIn("per-unit two-automatic-REVISE brake", prompt)
-        self.assertIn("child slice", prompt)
-        self.assertIn("dependencies and acceptance are independently meaningful", prompt)
-        self.assertIn("first `plan-verifier` review", prompt)
-        self.assertIn("Neither is user approval or write authorization", prompt)
-
-    def test_security_reviewer_prompt_keeps_evidence_before_first_review(self) -> None:
-        security_review = load_toml(AGENTS_DIR / "security-reviewer.toml")
-        prompt = security_review["developer_instructions"]
-
-        self.assertIn("read-only", prompt)
-        self.assertIn("explicit evidence gap", prompt)
-        self.assertIn("Plan ledger", prompt)
-        self.assertRegex(
-            prompt,
-            r"before the first\s+plan-verifier review",
-        )
-        self.assertIn("does not", prompt)
-        self.assertIn("produce an implementation brief", prompt)
 
     def test_config_keeps_main_effort_user_controlled(self) -> None:
         config = load_toml(ROOT / "templates" / "config.snippet.toml")
@@ -197,10 +153,6 @@ class TemplateContractTests(unittest.TestCase):
         self.assertIn("Do not set `features.multi_agent_v2.enabled`", installer)
         self.assertIn("start a fresh Codex session", installer)
         self.assertIn("install/verify_dispatch.py --live --yes", installer)
-        self.assertIn("program envelope and independently approvable slices", installer)
-        self.assertIn("independent envelope-first readiness gate", installer)
-        self.assertIn("per-unit Plan epochs", installer)
-        self.assertIn("approval/write boundary", installer)
         self.assertIn(
             "--config ~/.codex/config.toml ~/.codex/agents",
             installer,
@@ -261,15 +213,7 @@ class TemplateContractTests(unittest.TestCase):
         self.assertIn("install/verify_dispatch.py --live --yes", readme)
         self.assertIn("ADAPTER_OK", readme)
         self.assertIn("NATIVE_OK", readme)
-        self.assertIn("Plan readiness contract", readme)
-        self.assertIn("two automatic `REVISE` verdicts", readme)
-        self.assertIn("only the affected", readme)
-        self.assertIn("readiness unit pauses", readme)
-        self.assertRegex(readme, r"`READY`\s+never authorizes\s+writes")
-        self.assertIn(
-            "./docs/design.md#plan-epochs-and-readiness",
-            readme,
-        )
+
         for role in ROUTING:
             self.assertIn(f"`{role}`", readme)
 
@@ -285,16 +229,6 @@ class TemplateContractTests(unittest.TestCase):
         self.assertIn("fail closed", design)
         self.assertIn("static packaging proof", design)
         self.assertIn("live routing proof", design)
-        self.assertIn("Plan epochs and readiness", design)
-        self.assertIn(
-            "per `(readiness-unit ID, Plan epoch)` pair",
-            design,
-        )
-        self.assertIn("per stable", design)
-        self.assertIn("readiness-unit ID", design)
-        self.assertIn("pauses only that readiness unit", design)
-        self.assertIn("paused envelope blocks every child", design)
-        self.assertIn("cross-cutting slices still gate dependents", design)
 
 
 class AgentStaticValidationTests(unittest.TestCase):

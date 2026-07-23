@@ -70,146 +70,46 @@ class PolicyTests(unittest.TestCase):
         self.assertRegex(policy, r"fail\s+closed")
         self.assertNotIn('fork_turns = "all"', policy)
 
-    def test_plan_ready_is_bare_and_revise_has_every_blocker_field(self) -> None:
-        policy = (ROOT / "templates" / "agents-md.orchestration.md").read_text()
-
-        self.assertIn("`READY` must be the entire response", policy)
-        self.assertIn("the bare uppercase word", policy)
-        self.assertIn("`REVISE` is never a bare response", policy)
-        for field in (
-            "`Blocker`",
-            "`Evidence`",
-            "`Minimum revision`",
-            "`Acceptance check`",
-        ):
-            self.assertIn(field, policy)
-        self.assertIn("explicit `evidence gap`", policy)
-        for label in (
-            "`Blocker: ...`",
-            "`Evidence:",
-            "`Minimum revision: ...`",
-            "`Acceptance check: ...`",
-        ):
-            self.assertIn(label, policy)
-        self.assertRegex(
-            policy,
-            r"protocol\s+failure, not a readiness verdict",
-        )
-        self.assertIn("same unchanged readiness unit once per unit epoch", policy)
-        self.assertIn(
-            "separate from the two valid automatic `REVISE` rounds",
-            policy,
-        )
-
-    def test_plan_epoch_brakes_automatic_revise_without_fake_reset(self) -> None:
-        policy = (ROOT / "templates" / "agents-md.orchestration.md").read_text()
-
-        self.assertIn("program envelope", policy)
-        for envelope_field in (
-            "outcome and non-goals",
-            "cross-cutting architecture/security/privacy",
-            "dependency DAG",
-            "integration and rollback",
-            "global budget",
-        ):
-            self.assertIn(envelope_field, policy)
-        for slice_field in (
-            "stable slice ID",
-            "exclusive ownership",
-            "stable prerequisites",
-            "acceptance checks",
-            "rollback",
-            "cosmetic fragmentation",
-        ):
-            self.assertIn(slice_field, policy)
-        self.assertRegex(
-            policy,
-            r"smallest\s+genuinely independently approvable",
-        )
-        self.assertIn("stable readiness-unit ID", policy)
-        self.assertIn(
-            "per `(stable readiness-unit ID, Plan epoch)`",
-            policy,
-        )
-        self.assertIn("The envelope is its own readiness unit", policy)
-        self.assertIn("must return `READY` before", policy)
-        self.assertIn("never bundles the envelope with a", policy)
-        self.assertIn("review only the next executable slice by", policy)
-        self.assertIn("stop readiness review and present", policy)
-        self.assertIn("Keep downstream slices in", policy)
-        self.assertIn("Fully specify only the next executable slice", policy)
-        self.assertIn("Missing future detail is not a blocker", policy)
-        self.assertIn("explicitly requests a batch", policy)
-        self.assertIn("A paused envelope keeps every dependent slice", policy)
-        self.assertIn("After each `REVISE`", policy)
-        self.assertIn("fresh `plan-verifier`", policy)
-        self.assertRegex(policy, r"genuine slice\s+split or narrowing")
-        self.assertRegex(
-            policy,
-            r"dependencies and\s+acceptance are independently meaningful",
-        )
-        self.assertIn("second automatic", policy)
-        self.assertIn("pause only that unit", policy)
-        self.assertIn("Never treat this cap as `READY`", policy)
-        self.assertRegex(policy, r"silently\s+overrule")
-        self.assertIn("A readiness unit's Plan epoch changes only when the user materially changes", policy)
-        self.assertIn("superficial rewrite", policy)
-        self.assertRegex(policy, r"Unrelated\s+`READY` slices may proceed")
-        self.assertIn("blocked prerequisites and cross-cutting slices still", policy)
-        self.assertIn("User-directed continuation is allowed", policy)
-        self.assertIn("not a silent count reset", policy)
-        self.assertIn(
-            "whether the unit is an envelope or a slice",
-            policy,
-        )
-
-    def test_envelope_is_an_independent_gate_before_slice_readiness(self) -> None:
-        policy = (ROOT / "templates" / "agents-md.orchestration.md").read_text()
-        plan = (AGENT_DIR / "plan-verifier.toml").read_text()
-
-        for phrase in (
-            "exactly one readiness unit at a time",
-            "the envelope first, then one slice",
-            "envelope must be `READY` before any child slice readiness review",
-            "stable readiness-unit ID",
-        ):
-            self.assertIn(phrase, policy)
-        for phrase in (
-            "Review exactly one",
-            "either the program envelope or one",
-            "Never review both in one call",
-            "evidence that its envelope already received `READY`",
-            "reviewed before its envelope is `READY`",
-        ):
-            self.assertIn(phrase, plan)
-
-    def test_security_ordering_approval_and_verifier_vocab_stay_separate(self) -> None:
+    def test_verifier_contracts_converge_without_crossing_boundaries(self) -> None:
         policy = (ROOT / "templates" / "agents-md.orchestration.md").read_text()
         plan = (AGENT_DIR / "plan-verifier.toml").read_text()
         outcome = (AGENT_DIR / "verifier.toml").read_text()
         security = (AGENT_DIR / "security-reviewer.toml").read_text()
+        normalized_policy = " ".join(policy.split())
 
-        self.assertRegex(
-            policy,
-            r"finish the read-only\s+`security-reviewer`",
-        )
-        self.assertIn("before the first `plan-verifier` call", policy)
-        self.assertRegex(policy, r"Never\s+launch those reviews concurrently")
-        self.assertIn("`READY` is readiness only, never user approval", policy)
-        self.assertIn("wait for explicit user approval", policy)
-        self.assertIn("A ready slice may execute while unrelated or later", policy)
-        self.assertIn("blocked prerequisites and cross-cutting", policy)
-        self.assertIn("only `CONFIRMED` or `REFUTED`", policy)
+        for phrase in (
+            "program envelope",
+            "next executable slice",
+            "scope, non-goals",
+            "acceptance that proves the slice outcome",
+            "slice-local budget",
+            "stop conditions",
+            "Blocker:",
+            "Evidence:",
+            "Minimum revision:",
+            "Acceptance check:",
+            "two automatic `REVISE` verdicts for the same unit",
+            "surface the blockers and options to the user",
+            "substantially unchanged Plan",
+            "findings and dispositions into the Plan",
+            "two consecutive `REFUTED` verdicts for that claim",
+            "stop automatic fix-and-reverify",
+        ):
+            self.assertIn(phrase, normalized_policy)
+        self.assertNotIn("Plan epoch", policy)
+        self.assertNotIn("format-recovery", policy)
 
+        self.assertIn("Return exactly one form", plan)
+        self.assertIn("explicit outcome, scope and non-goals", plan)
+        self.assertIn("acceptance that proves the slice outcome", plan)
+        self.assertIn("a slice-local budget", plan)
+        self.assertIn("slice-local stop conditions", plan)
+        self.assertIn("completed security-reviewer findings", plan)
         self.assertNotIn("CONFIRMED", plan)
         self.assertNotIn("REFUTED", plan)
         self.assertNotIn("READY", outcome)
         self.assertNotIn("REVISE", outcome)
-        self.assertRegex(
-            security,
-            r"before the first\s+plan-verifier review",
-        )
-        self.assertIn("does not", security)
+        self.assertIn("first plan-verifier review", security)
 
 
 if __name__ == "__main__":

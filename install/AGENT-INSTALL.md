@@ -52,15 +52,6 @@ verifiable. Never install either retired asset as an active role.
 > can supersede a custom agent default. Report the active parent permission
 > mode in the plan; do not describe the port as an absolute tool allowlist.
 
-The installed orchestration block also carries the bounded Plan-readiness
-contract: a program envelope and independently approvable slices for large
-work, an independent envelope-first readiness gate, bare `READY`, structured
-`REVISE` blockers, per-unit Plan epochs with a two-automatic-round brake,
-security-review evidence before the first Plan review for each affected unit,
-and an explicit approval/write boundary. Treat that policy text as
-authoritative after installation; this runbook does not interpret a verifier
-verdict as user approval.
-
 ## Updating an existing install
 
 Before the normal preflight, inspect both global instruction candidates and the

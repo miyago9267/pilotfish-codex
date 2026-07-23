@@ -126,67 +126,23 @@ ambiguity resolution, integration, and final judgment throughout the lifecycle.
 | Phase | Stable before delegation | Eligible delegated work |
 |---|---|---|
 | Discovery | Question, allowed scope, evidence format, and stop condition | Independent `scout` contracts on disjoint evidence surfaces |
-| Plan | Program envelope when needed, then independently approvable slices with stable prerequisites, ownership, acceptance, rollback, and stops | Fresh `plan-verifier` challenge for exactly one unit: envelope first, then one slice |
+| Plan | Program envelope when needed, then independently approvable slices with explicit outcome, scope, non-goals, stable prerequisites, ownership, proving acceptance, rollback, slice-local budget, and stop conditions | Fresh `plan-verifier` challenge for exactly one unit: envelope first, then one slice |
 | Approval | Material Plan is visible and writes are authorized when required | Read-only clarification or security evidence only |
 | Execution | Scope, exclusive ownership, constraints, done criteria, integration, and verification | `mech-executor`, `executor`, or `security-executor` |
 | Verification | Integrated result is concrete enough to reproduce and refute | Fresh `verifier` challenge |
 
-### Plan epochs and readiness
+### Plan readiness
 
-For long-running or large work, the main session keeps a program envelope with
-the outcome and non-goals, cross-cutting architecture/security/privacy
-invariants, dependency DAG, integration/rollback, global budget, and stops.
-Unresolved cross-cutting blockers still gate dependent writes. The envelope is
-its own stable readiness unit and must receive fresh `READY` before any child
-slice review. It is then decomposed into the smallest genuinely independently
-approvable, executable, and verifiable slices. Each slice has a stable slice ID,
-exclusive ownership, stable prerequisites, acceptance, and rollback; cosmetic
-fragmentation cannot bypass a blocker.
+Large work keeps shared constraints in a program envelope and splits only
+independent execution slices. A fresh `plan-verifier` reviews the envelope,
+then the next executable slice. Bare `READY` opens the approval gate;
+structured `REVISE` carries blocker evidence and the smallest observable
+closure check.
 
-The Plan ledger tracks readiness, evidence, blockers, revisions, and acceptance
-checks per stable readiness-unit ID, and tracks the automatic `REVISE` count
-per `(readiness-unit ID, Plan epoch)` pair. Each fresh verifier reviews exactly
-one envelope or slice.
-After the envelope and next executable slice are `READY`, the main session
-stops readiness review and seeks explicit approval. Downstream slices remain in
-Plan until their prerequisites make them next, unless the user requests a batch
-or one approval and integration boundary requires the slices together.
-Only the next slice is fully specified. Downstream entries retain stable IDs,
-outcomes, dependency and ownership boundaries, acceptance intent, and
-rollback/stop summaries until they become next.
-A fresh `plan-verifier` must return the bare word `READY` when no blocker
-remains. A `REVISE` response is never bare: every blocker carries `Blocker`,
-`Evidence` (`file:line` when available, otherwise an explicit evidence gap),
-`Minimum revision`, and `Acceptance check`.
-Malformed or decorated output is a protocol failure rather than a Plan
-judgment. It cannot advance readiness or trigger a revision; one fresh
-same-unit format-recovery retry is allowed per epoch without consuming a valid
-automatic `REVISE` round.
-
-After each automatic `REVISE` for a readiness unit, the main session may
-materially revise it or add evidence and must run a fresh `plan-verifier`. A
-genuine split or narrowing may create child slices with new epochs only when
-their dependencies and acceptance are independently meaningful; record the
-material scope change as a new child ID without resetting the parent's count.
-The second automatic `REVISE` pauses only that readiness unit; the main session
-surfaces its blockers and options for explicit user direction and never
-converts the cap into readiness. A paused envelope blocks every child.
-Unrelated `READY` slices may proceed after explicit approval, while blocked
-prerequisites and cross-cutting slices still gate dependents.
-Only a material user change to an envelope or slice outcome, scope, or
-architecture, or the user's explicit selection of a materially new Plan after
-intervention, starts a new readiness-unit epoch and automatic count.
-Superficial rewrites do not reset an epoch, while user-directed continuation
-remains allowed without silently resetting it.
-
-For authentication, authorization, credential, identity, privacy, secrets,
-crypto/cryptography, validation, hardening, or vulnerability work, the
-read-only `security-reviewer` finishes and its evidence is copied into the Plan
-ledger before the first `plan-verifier` call for the affected envelope or
-slice. The reviews do not run concurrently. `READY` is
-readiness only; it never substitutes for explicit user approval or authorizes
-writes. The post-Execution `verifier` retains the separate
-`CONFIRMED`/`REFUTED` vocabulary.
+After two automatic revisions for one unit, the main session stops resubmitting
+it and returns the unresolved choices to the user. This does not make the unit
+ready or reset shared prerequisites. Security-sensitive units complete
+read-only security review before their first readiness pass.
 
 A delegation-planning layer may choose discovery questions, topology, worker
 count, ownership, sequence, budgets, and stop conditions. Pilotfish policy
