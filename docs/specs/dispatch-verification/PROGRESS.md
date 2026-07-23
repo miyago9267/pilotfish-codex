@@ -1,5 +1,8 @@
 # PROGRESS — dispatch-verification
 
+> Historical adapter progress. The active native target is
+> `codex-native-multi-agent-migration`.
+
 ## Reconciliation (done)
 
 - [x] Retire the outdated claim that all `codex exec` sessions lack subagents.

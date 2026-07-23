@@ -1,5 +1,8 @@
 # TASKS — dispatch-verification
 
+> Historical adapter task record. Native implementation is owned by
+> `codex-native-multi-agent-migration`.
+
 Implementation ownership moved to `docs/specs/subagent-issue/`.
 
 ## Reconciled mechanism proof

@@ -1,17 +1,8 @@
-# Pilotfish orchestration with Remora-aligned Codex routing.
+# Pilotfish native Codex Multi-Agent V2 configuration.
 # Merge these keys and tables into ~/.codex/config.toml.
 model = "gpt-5.6-sol"
 
-[features]
-multi_agent = true
-
 [features.multi_agent_v2]
-hide_spawn_agent_metadata = false
-tool_namespace = "agents"
+enabled = true
+# Total slots, including the root session: root + three children.
 max_concurrent_threads_per_session = 4
-
-[agents]
-# One orchestrator plus up to three leaf workers keeps fan-out bounded.
-max_threads = 3
-# Root may spawn leaves; leaves may not spawn another generation.
-max_depth = 1

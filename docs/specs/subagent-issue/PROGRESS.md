@@ -1,5 +1,8 @@
 # PROGRESS — subagent-issue
 
+> Historical adapter progress. Active native work is tracked in
+> `codex-native-multi-agent-migration`.
+
 ## Phase 0 — Research and reconciliation (done)
 
 - [x] Reproduce the affected ChatGPT-auth reserved-schema failure with bare

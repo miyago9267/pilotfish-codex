@@ -1,1155 +1,767 @@
 from __future__ import annotations
 
-import argparse
-import hashlib
 import io
 import json
+import os
 import shutil
-import stat
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
-from contextlib import redirect_stderr, redirect_stdout
+from argparse import Namespace
+from contextlib import redirect_stderr
 from pathlib import Path
-
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "install"))
-
+import stage_smoke_home  # noqa: E402
 import verify_dispatch  # noqa: E402
-from verify_dispatch import (  # noqa: E402
-    EvidenceError,
-    LiveEvidence,
-    ReceiptError,
-    RoleBinding,
-    build_codex_command,
-    candidate_day_directories,
-    classify_exec_failure,
-    extract_child_thread_id,
-    inspect_dispatch,
-    load_jsonl,
-    locate_rollout,
-    main as verify_main,
-    parse_exec_thread_id,
-    prepare_receipt_destination,
-    read_role_binding,
-    receipt_payload,
-    task_name_for_role,
-    write_receipt,
-)
+from stage_smoke_home import StageError, materialize  # noqa: E402
+from verify_dispatch import RoleBinding, build_codex_command, hash_inputs, inspect_dispatch, receipt_payload, validate_home_pair, validate_receipt, validate_stage_layout  # noqa: E402
+
+PARENT = "parent-runtime-id"
+CHILD = "child-runtime-id"
+CALL = "call-1"
+WAIT_CALL = "wait-1"
 
 
-PARENT_ID = "019f7000-0000-7000-8000-000000000001"
-CHILD_ID = "019f7000-0000-7000-8000-000000000002"
-CALL_ID = "call_model_probe"
-
-
-def parent_events(
-    *,
-    namespace: str = "agents",
-    agent_type: str | None = "scout",
-    fork_turns: str | None = "none",
-    multi_agent_version: str = "v2",
-    parent_model: str = "gpt-5.6-terra",
-) -> list[dict]:
-    arguments: dict[str, str] = {
-        "task_name": "model_probe",
-        "message": "Reply with one line.",
-    }
-    if agent_type is not None:
-        arguments["agent_type"] = agent_type
-    if fork_turns is not None:
-        arguments["fork_turns"] = fork_turns
-
+def parent_events(arguments: dict | None = None, version: str = "v2") -> list[dict]:
+    arguments = arguments or {"message": "ready", "agent_type": "scout", "task_name": "model_probe_scout", "fork_turns": "none"}
     return [
-        {"type": "session_meta", "payload": {"id": PARENT_ID}},
-        {
-            "type": "turn_context",
-            "payload": {
-                "model": parent_model,
-                "effort": "low",
-                "multi_agent_version": multi_agent_version,
-            },
-        },
-        {
-            "type": "response_item",
-            "payload": {
-                "type": "function_call",
-                "name": "spawn_agent",
-                "namespace": namespace,
-                "arguments": json.dumps(arguments),
-                "call_id": CALL_ID,
-            },
-        },
-        {
-            "type": "event_msg",
-            "payload": {
-                "type": "sub_agent_activity",
-                "event_id": CALL_ID,
-                "agent_thread_id": CHILD_ID,
-                "agent_path": "/root/model_probe",
-                "kind": "started",
-            },
-        },
+        {"type": "session_meta", "payload": {"id": PARENT}},
+        {"type": "turn_context", "payload": {"model": "gpt-5.6-terra", "effort": "low", "multi_agent_version": version}},
+        {"type": "response_item", "payload": {"type": "function_call", "name": "spawn_agent", "namespace": "any-upstream-value", "call_id": CALL, "arguments": json.dumps(arguments)}},
+        {"type": "event_msg", "payload": {"type": "sub_agent_activity", "kind": "started", "event_id": CALL, "agent_thread_id": CHILD}},
+        {"type": "response_item", "payload": {"type": "function_call", "name": "wait_agent", "call_id": WAIT_CALL, "arguments": json.dumps({"timeout_ms": 30000})}},
     ]
 
 
-def child_events(
-    *,
-    parent_id: str = PARENT_ID,
-    model: str = "gpt-5.6-luna",
-    effort: str = "low",
-) -> list[dict]:
-    return [
-        {
-            "type": "session_meta",
-            "payload": {"id": CHILD_ID, "parent_thread_id": parent_id},
-        },
-        {
-            "type": "turn_context",
-            "payload": {"model": model, "effort": effort},
-        },
-    ]
-
-
-class DispatchEvidenceTests(unittest.TestCase):
-    binding = RoleBinding(model="gpt-5.6-luna", effort="low")
-
-    def test_adapter_proves_exact_child_uses_a_different_model(self) -> None:
-        verdict = inspect_dispatch(
-            parent_events(),
-            child_events(),
-            expected_role=self.binding,
-            expected_namespace="agents",
-        )
-
-        self.assertEqual(verdict.status, "ADAPTER_OK")
-        self.assertEqual(verdict.reason, "verified_distinct_model")
-        self.assertEqual(verdict.parent_thread_id, PARENT_ID)
-        self.assertEqual(verdict.child_thread_id, CHILD_ID)
-        self.assertEqual(verdict.parent_model, "gpt-5.6-terra")
-        self.assertEqual(verdict.child_model, "gpt-5.6-luna")
-
-    def test_native_namespace_reports_native_ok(self) -> None:
-        unproven = inspect_dispatch(
-            parent_events(namespace="collaboration"),
-            child_events(),
-            expected_role=self.binding,
-            expected_namespace="collaboration",
-        )
-        verdict = inspect_dispatch(
-            parent_events(namespace="collaboration"),
-            child_events(),
-            expected_role=self.binding,
-            expected_namespace="collaboration",
-            adapter_free=True,
-        )
-
-        self.assertEqual(unproven.status, "FAILED")
-        self.assertEqual(unproven.reason, "native_adapter_state_unproven")
-        self.assertEqual(verdict.status, "NATIVE_OK")
-
-    def test_v1_is_skipped_as_adapter_not_exercised(self) -> None:
-        verdict = inspect_dispatch(
-            parent_events(multi_agent_version="v1"),
-            child_events(),
-            expected_role=self.binding,
-            expected_namespace="agents",
-        )
-
-        self.assertEqual(verdict.status, "SKIPPED")
-        self.assertEqual(verdict.reason, "adapter_not_exercised")
-
-    def test_namespace_role_and_context_mismatches_fail_closed(self) -> None:
-        cases = (
-            (parent_events(namespace="collaboration"), "namespace_mismatch"),
-            (parent_events(agent_type=None), "agent_type_mismatch"),
-            (parent_events(fork_turns="all"), "fork_turns_mismatch"),
-        )
-
-        for events, reason in cases:
-            with self.subTest(reason=reason):
-                verdict = inspect_dispatch(
-                    events,
-                    child_events(),
-                    expected_role=self.binding,
-                    expected_namespace="agents",
-                )
-                self.assertEqual(verdict.status, "FAILED")
-                self.assertEqual(verdict.reason, reason)
-
-    def test_explicit_service_tier_override_fails_closed(self) -> None:
-        for service_tier in ("fast", "default", "", None):
-            with self.subTest(service_tier=service_tier):
-                events = parent_events()
-                arguments = json.loads(events[2]["payload"]["arguments"])
-                arguments["service_tier"] = service_tier
-                events[2]["payload"]["arguments"] = json.dumps(arguments)
-                verdict = inspect_dispatch(
-                    events,
-                    child_events(),
-                    expected_role=self.binding,
-                    expected_namespace="agents",
-                )
-
-                self.assertEqual(verdict.status, "FAILED")
-                self.assertEqual(
-                    verdict.reason,
-                    "service_tier_override_forbidden",
-                )
-
-    def test_missing_ambiguous_or_invalid_spawn_evidence_fails_closed(self) -> None:
-        missing_activity = parent_events()[:-1]
-        duplicate_spawn = parent_events()
-        duplicate_spawn.insert(3, dict(duplicate_spawn[2]))
-        invalid_task = parent_events()
-        invalid_arguments = json.loads(invalid_task[2]["payload"]["arguments"])
-        invalid_arguments["task_name"] = "Bad-Task"
-        invalid_task[2]["payload"]["arguments"] = json.dumps(invalid_arguments)
-        invalid_task[3]["payload"]["agent_path"] = "/root/Bad-Task"
-
-        cases = (
-            (missing_activity, "child_activity_missing"),
-            (duplicate_spawn, "spawn_call_ambiguous"),
-            (invalid_task, "task_name_mismatch"),
-        )
-        for events, reason in cases:
-            with self.subTest(reason=reason):
-                verdict = inspect_dispatch(
-                    events,
-                    child_events(),
-                    expected_role=self.binding,
-                    expected_namespace="agents",
-                )
-                self.assertEqual((verdict.status, verdict.reason), ("FAILED", reason))
-
-    def test_missing_or_empty_correlation_ids_fail_closed(self) -> None:
-        for missing_value in (None, ""):
-            events = parent_events()
-            if missing_value is None:
-                events[2]["payload"].pop("call_id")
-                events[3]["payload"].pop("event_id")
-            else:
-                events[2]["payload"]["call_id"] = missing_value
-                events[3]["payload"]["event_id"] = missing_value
-
-            with self.subTest(missing_value=missing_value):
-                verdict = inspect_dispatch(
-                    events,
-                    child_events(),
-                    expected_role=self.binding,
-                    expected_namespace="agents",
-                )
-                self.assertEqual(
-                    (verdict.status, verdict.reason),
-                    ("FAILED", "spawn_call_id_missing"),
-                )
-                with self.assertRaises(EvidenceError):
-                    extract_child_thread_id(events)
-
-    def test_missing_or_mismatched_activity_event_id_fails_closed(self) -> None:
-        for event_id in (None, "", "different-call"):
-            events = parent_events()
-            if event_id is None:
-                events[3]["payload"].pop("event_id")
-            else:
-                events[3]["payload"]["event_id"] = event_id
-
-            with self.subTest(event_id=event_id):
-                verdict = inspect_dispatch(
-                    events,
-                    child_events(),
-                    expected_role=self.binding,
-                    expected_namespace="agents",
-                )
-                self.assertEqual(
-                    (verdict.status, verdict.reason),
-                    ("FAILED", "child_activity_missing"),
-                )
-                with self.assertRaises(EvidenceError):
-                    extract_child_thread_id(events)
-
-    def test_non_object_spawn_arguments_fail_closed(self) -> None:
-        for arguments in ([], "scout", None, 1):
-            events = parent_events()
-            events[2]["payload"]["arguments"] = json.dumps(arguments)
-
-            with self.subTest(arguments=arguments):
-                verdict = inspect_dispatch(
-                    events,
-                    child_events(),
-                    expected_role=self.binding,
-                    expected_namespace="agents",
-                )
-                self.assertEqual(
-                    (verdict.status, verdict.reason),
-                    ("FAILED", "spawn_arguments_invalid"),
-                )
-                with self.assertRaises(EvidenceError):
-                    extract_child_thread_id(events)
-
-    def test_parent_child_and_role_binding_mismatches_fail_closed(self) -> None:
-        cases = (
-            (child_events(parent_id="wrong-parent"), "parent_child_mismatch"),
-            (child_events(model="gpt-5.6-sol"), "child_model_mismatch"),
-            (child_events(effort="medium"), "child_effort_mismatch"),
-        )
-
-        for events, reason in cases:
-            with self.subTest(reason=reason):
-                verdict = inspect_dispatch(
-                    parent_events(),
-                    events,
-                    expected_role=self.binding,
-                    expected_namespace="agents",
-                )
-                self.assertEqual(verdict.status, "FAILED")
-                self.assertEqual(verdict.reason, reason)
-
-    def test_conflicting_turn_context_evidence_fails_closed(self) -> None:
-        conflicting_parent = parent_events()
-        conflicting_parent.insert(
-            2,
-            {
-                "type": "turn_context",
-                "payload": {
-                    "model": "gpt-5.6-sol",
-                    "effort": "max",
-                    "multi_agent_version": "v2",
-                },
-            },
-        )
-        conflicting_child = child_events()
-        conflicting_child.append(
-            {
-                "type": "turn_context",
-                "payload": {"model": "gpt-5.6-sol", "effort": "max"},
-            }
-        )
-
-        cases = (
-            (conflicting_parent, child_events(), "parent_context_conflict"),
-            (parent_events(), conflicting_child, "child_context_conflict"),
-        )
-        for parents, children, reason in cases:
-            with self.subTest(reason=reason):
-                verdict = inspect_dispatch(
-                    parents,
-                    children,
-                    expected_role=self.binding,
-                    expected_namespace="agents",
-                )
-                self.assertEqual((verdict.status, verdict.reason), ("FAILED", reason))
-
-    def test_invalid_turn_context_required_fields_fail_closed(self) -> None:
-        parent_cases = (
-            ("model", []),
-            ("effort", None),
-            ("multi_agent_version", 2),
-        )
-        for field, value in parent_cases:
-            events = parent_events()
-            events[1]["payload"][field] = value
-            with self.subTest(side="parent", field=field):
-                verdict = inspect_dispatch(
-                    events,
-                    child_events(),
-                    expected_role=self.binding,
-                    expected_namespace="agents",
-                )
-                self.assertEqual(
-                    (verdict.status, verdict.reason),
-                    ("FAILED", "parent_context_invalid"),
-                )
-
-        for field, value in (("model", []), ("effort", "")):
-            events = child_events()
-            events[1]["payload"][field] = value
-            with self.subTest(side="child", field=field):
-                verdict = inspect_dispatch(
-                    parent_events(),
-                    events,
-                    expected_role=self.binding,
-                    expected_namespace="agents",
-                )
-                self.assertEqual(
-                    (verdict.status, verdict.reason),
-                    ("FAILED", "child_context_invalid"),
-                )
-
-    def test_malformed_turn_context_payload_alongside_valid_evidence_fails_closed(
-        self,
-    ) -> None:
-        for malformed in (
-            {"type": "turn_context"},
-            {"type": "turn_context", "payload": None},
-        ):
-            parents = parent_events() + [malformed]
-            with self.subTest(side="parent", malformed=malformed):
-                verdict = inspect_dispatch(
-                    parents,
-                    child_events(),
-                    expected_role=self.binding,
-                    expected_namespace="agents",
-                )
-                self.assertEqual(
-                    (verdict.status, verdict.reason),
-                    ("FAILED", "parent_context_invalid"),
-                )
-
-            children = child_events() + [malformed]
-            with self.subTest(side="child", malformed=malformed):
-                verdict = inspect_dispatch(
-                    parent_events(),
-                    children,
-                    expected_role=self.binding,
-                    expected_namespace="agents",
-                )
-                self.assertEqual(
-                    (verdict.status, verdict.reason),
-                    ("FAILED", "child_context_invalid"),
-                )
-
-    def test_malformed_relevant_parent_evidence_payload_fails_closed(self) -> None:
-        expected_reasons = {
-            "session_meta": "parent_evidence_invalid",
-            "turn_context": "parent_context_invalid",
-            "response_item": "parent_evidence_invalid",
-            "event_msg": "parent_evidence_invalid",
-        }
-        for event_type, reason in expected_reasons.items():
-            for payload in ("missing", None, []):
-                malformed = {"type": event_type}
-                if payload != "missing":
-                    malformed["payload"] = payload
-                events = parent_events() + [malformed]
-
-                with self.subTest(event_type=event_type, payload=payload):
-                    verdict = inspect_dispatch(
-                        events,
-                        child_events(),
-                        expected_role=self.binding,
-                        expected_namespace="agents",
-                    )
-                    self.assertEqual(
-                        (verdict.status, verdict.reason),
-                        ("FAILED", reason),
-                    )
-
-    def test_malformed_relevant_child_evidence_payload_fails_closed(self) -> None:
-        expected_reasons = {
-            "session_meta": "child_evidence_invalid",
-            "turn_context": "child_context_invalid",
-        }
-        for event_type, reason in expected_reasons.items():
-            for payload in ("missing", None, []):
-                malformed = {"type": event_type}
-                if payload != "missing":
-                    malformed["payload"] = payload
-                events = child_events() + [malformed]
-
-                with self.subTest(event_type=event_type, payload=payload):
-                    verdict = inspect_dispatch(
-                        parent_events(),
-                        events,
-                        expected_role=self.binding,
-                        expected_namespace="agents",
-                    )
-                    self.assertEqual(
-                        (verdict.status, verdict.reason),
-                        ("FAILED", reason),
-                    )
-
-    def test_malformed_relevant_extractor_evidence_raises(self) -> None:
-        for event_type in ("response_item", "event_msg"):
-            for payload in ("missing", None, []):
-                malformed = {"type": event_type}
-                if payload != "missing":
-                    malformed["payload"] = payload
-
-                with self.subTest(event_type=event_type, payload=payload):
-                    with self.assertRaises(EvidenceError):
-                        extract_child_thread_id(parent_events() + [malformed])
-
-    def test_non_evidence_events_do_not_require_payload_objects(self) -> None:
-        extras = [
-            {"type": "unknown"},
-            {"type": "normal", "payload": None},
-            {"type": "diagnostic", "payload": []},
-        ]
-
-        verdict = inspect_dispatch(
-            parent_events() + extras,
-            child_events() + extras,
-            expected_role=self.binding,
-            expected_namespace="agents",
-        )
-
-        self.assertEqual(verdict.status, "ADAPTER_OK")
-        self.assertEqual(extract_child_thread_id(parent_events() + extras), CHILD_ID)
-
-    def test_non_object_outer_evidence_event_fails_closed(self) -> None:
-        malformed = parent_events() + [None]
-
-        verdict = inspect_dispatch(
-            malformed,
-            child_events(),
-            expected_role=self.binding,
-            expected_namespace="agents",
-        )
-
-        self.assertEqual(
-            (verdict.status, verdict.reason),
-            ("FAILED", "parent_evidence_invalid"),
-        )
-        with self.assertRaises(EvidenceError):
-            extract_child_thread_id(malformed)
-
-    def test_duplicate_consistent_turn_context_evidence_is_accepted(self) -> None:
-        parents = parent_events()
-        parents.insert(2, dict(parents[1], payload=dict(parents[1]["payload"])))
-        children = child_events()
-        children.append(dict(children[1], payload=dict(children[1]["payload"])))
-
-        verdict = inspect_dispatch(
-            parents,
-            children,
-            expected_role=self.binding,
-            expected_namespace="agents",
-        )
-
-        self.assertEqual(verdict.status, "ADAPTER_OK")
-
-    def test_inherited_parent_model_never_passes(self) -> None:
-        inherited = RoleBinding(model="gpt-5.6-terra", effort="low")
-
-        verdict = inspect_dispatch(
-            parent_events(),
-            child_events(model="gpt-5.6-terra"),
-            expected_role=inherited,
-            expected_namespace="agents",
-        )
-
-        self.assertEqual(verdict.status, "FAILED")
-        self.assertEqual(verdict.reason, "inherited_parent_model")
-
-
-class DispatchRolloutLocationTests(unittest.TestCase):
-    def test_exec_thread_id_accepts_current_json_event_shapes(self) -> None:
-        direct = json.dumps({"type": "thread.started", "thread_id": PARENT_ID})
-        nested = json.dumps(
-            {"type": "thread.started", "thread": {"id": PARENT_ID}}
-        )
-
-        self.assertEqual(parse_exec_thread_id(direct), PARENT_ID)
-        self.assertEqual(parse_exec_thread_id(nested), PARENT_ID)
-
-    def test_exec_thread_id_rejects_missing_or_ambiguous_ids(self) -> None:
-        with self.assertRaises(EvidenceError):
-            parse_exec_thread_id(json.dumps({"type": "turn.completed"}))
-
-        duplicate = "\n".join(
-            (
-                json.dumps({"type": "thread.started", "thread_id": PARENT_ID}),
-                json.dumps({"type": "thread.started", "thread_id": CHILD_ID}),
-            )
-        )
-        with self.assertRaises(EvidenceError):
-            parse_exec_thread_id(duplicate)
-
-    def test_exec_thread_id_rejects_non_object_json_events(self) -> None:
-        for event in ([], "thread.started", None, 1):
-            with self.subTest(event=event):
-                with self.assertRaises(EvidenceError):
-                    parse_exec_thread_id(json.dumps(event))
-
-    def test_rollout_lookup_is_exact_and_rejects_duplicates(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            day = root / "2026" / "07" / "15"
-            day.mkdir(parents=True)
-            expected = day / f"rollout-test-{PARENT_ID}.jsonl"
-            expected.write_text("{}\n", encoding="utf-8")
-
-            self.assertEqual(locate_rollout(root, PARENT_ID, [day]), expected.resolve())
-
-            duplicate_day = root / "2026" / "07" / "16"
-            duplicate_day.mkdir(parents=True)
-            (duplicate_day / f"rollout-duplicate-{PARENT_ID}.jsonl").write_text(
-                "{}\n", encoding="utf-8"
-            )
-
-            with self.assertRaises(EvidenceError):
-                locate_rollout(root, PARENT_ID, [day, duplicate_day])
-
-    def test_rollout_rejects_non_object_payloads_instead_of_crashing(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            rollout = Path(directory) / "rollout.jsonl"
-            rollout.write_text(
-                json.dumps({"type": "response_item", "payload": "not-an-object"})
-                + "\n",
-                encoding="utf-8",
-            )
-            with self.assertRaises(EvidenceError):
-                load_jsonl(rollout)
-
-        hostile = [
-            {"type": "session_meta", "payload": "spoof"},
-            {"type": "turn_context", "payload": None},
-        ]
-        verdict = inspect_dispatch(
-            hostile,
-            [],
-            expected_role=RoleBinding(model="gpt-5.6-luna", effort="low"),
-            expected_namespace="agents",
-        )
-        self.assertEqual(verdict.status, "FAILED")
-
-    def test_rollout_loader_ignores_non_evidence_payload_shape(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            rollout = Path(directory) / "rollout.jsonl"
-            event = {"type": "diagnostic", "payload": ["normal", "data"]}
-            rollout.write_text(json.dumps(event) + "\n", encoding="utf-8")
-
-            self.assertEqual(load_jsonl(rollout), [event])
-
-    def test_rollout_lookup_treats_glob_metacharacters_literally(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            day = root / "2026" / "07" / "15"
-            day.mkdir(parents=True)
-            (day / "rollout-test-abcd1.jsonl").write_text("{}\n", encoding="utf-8")
-
-            for hostile in ("abcd?", "abcd[1]", "abc*", "*", "**/abcd1"):
-                with self.assertRaises(EvidenceError):
-                    locate_rollout(root, hostile, [day])
-
-            literal = day / "rollout-test-abcd[1].jsonl"
-            literal.write_text("{}\n", encoding="utf-8")
-            self.assertEqual(
-                locate_rollout(root, "abcd[1]", [day]), literal.resolve()
-            )
-
-    def test_rollout_lookup_does_not_fall_back_to_fuzzy_matches(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            day = root / "2026" / "07" / "15"
-            day.mkdir(parents=True)
-            (day / f"prefix-{PARENT_ID}-suffix.jsonl").write_text(
-                "{}\n", encoding="utf-8"
-            )
-
-            with self.assertRaises(EvidenceError):
-                locate_rollout(root, PARENT_ID, [day])
-
-    def test_rollout_lookup_rejects_candidates_outside_the_session_root(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            sessions = root / "sessions"
-            sessions.mkdir()
-            outside = root / "outside"
-            outside.mkdir()
-            (outside / f"rollout-test-{PARENT_ID}.jsonl").write_text(
-                "{}\n", encoding="utf-8"
-            )
-
-            with self.assertRaises(EvidenceError):
-                locate_rollout(sessions, PARENT_ID, [outside])
-
-    def test_rollout_lookup_rejects_symlinks_that_escape_the_session_root(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            sessions = root / "sessions"
-            day = sessions / "2026" / "07" / "15"
-            day.mkdir(parents=True)
-            outside = root / "outside.jsonl"
-            outside.write_text("{}\n", encoding="utf-8")
-            (day / f"rollout-test-{PARENT_ID}.jsonl").symlink_to(outside)
-
-            with self.assertRaises(EvidenceError):
-                locate_rollout(sessions, PARENT_ID, [day])
-
-    def test_exact_child_id_comes_from_the_correlated_activity(self) -> None:
-        self.assertEqual(extract_child_thread_id(parent_events()), CHILD_ID)
-
-        ambiguous = parent_events() + [parent_events()[-1]]
-        with self.assertRaises(EvidenceError):
-            extract_child_thread_id(ambiguous)
-
-
-class DispatchReceiptTests(unittest.TestCase):
-    def test_receipt_is_private_atomic_redacted_and_hashes_relative_rollouts(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            home = Path(directory)
-            rollout = home / "sessions" / "2026" / "07" / "20" / "parent.jsonl"
-            rollout.parent.mkdir(parents=True)
-            raw_evidence = b'{"prompt":"secret /absolute/path"}\n'
-            rollout.write_bytes(raw_evidence)
-            destination = prepare_receipt_destination(
-                codex_home=home, role="scout", receipt=Path("proof.json")
-            )
-            verdict = verify_dispatch._verdict(
-                "FAILED", "rollout_evidence_invalid", route_observation="not_observed"
-            )
-            payload = receipt_payload(
-                role="scout",
-                verdict=verdict,
-                sessions_root=home / "sessions",
-                evidence=LiveEvidence(parent_rollout=rollout),
-            )
-            receipt = write_receipt(destination, payload)
-
-            saved = json.loads(receipt.read_text(encoding="utf-8"))
-            self.assertEqual(saved["schema_version"], 1)
-            self.assertEqual(saved["version"], 1)
-            self.assertEqual(saved["schema"], "dispatch-receipt/v1")
-            self.assertIn("started_at_utc", saved["timestamps"])
-            self.assertIn("ended_at_utc", saved["timestamps"])
-            self.assertIn("repository_version", saved["tool"])
-            self.assertIn("codex_version", saved["tool"])
-            self.assertEqual(saved["request"]["role"], "scout")
-            self.assertIn("template_role_sha256", saved["preflight"])
-            self.assertIn("route_observation", saved["observation"])
-            self.assertIn("exit_code", saved["verdict"])
-            self.assertEqual(saved["rollouts"]["parent"]["ref"], "2026/07/20/parent.jsonl")
-            self.assertEqual(
-                saved["rollouts"]["parent"]["sha256"],
-                hashlib.sha256(raw_evidence).hexdigest(),
-            )
-            serialized = json.dumps(saved)
-            self.assertNotIn("secret", serialized)
-            self.assertNotIn("/absolute/path", serialized)
-            self.assertNotIn(str(home), serialized)
-            self.assertEqual(stat.S_IMODE(receipt.stat().st_mode), 0o600)
-            self.assertEqual(
-                stat.S_IMODE((home / "dispatch-receipts").stat().st_mode), 0o700
-            )
-
-    def test_receipt_never_overwrites_and_rejects_escape_paths(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            home = Path(directory)
-            destination = prepare_receipt_destination(
-                codex_home=home, role="scout", receipt=Path("proof.json")
-            )
-            write_receipt(destination, {"version": 1})
-            with self.assertRaises(ReceiptError):
-                write_receipt(destination, {"version": 1})
-            with self.assertRaises(ReceiptError):
-                prepare_receipt_destination(
-                    codex_home=home, role="scout", receipt=Path("../escape.json")
-                )
-
-    def test_receipt_failure_downgrades_adapter_success(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            destination = prepare_receipt_destination(
-                codex_home=Path(directory), role="scout", receipt=Path("proof.json")
-            )
-            args = argparse.Namespace(codex_home=Path(directory))
-            success = verify_dispatch._verdict("ADAPTER_OK", "verified_distinct_model")
-            with patch.object(
-                verify_dispatch, "write_receipt", side_effect=ReceiptError("blocked")
-            ), redirect_stderr(io.StringIO()):
-                verdict = verify_dispatch._write_role_receipt(
-                    args=args,
-                    role="scout",
-                    verdict=success,
-                    evidence=LiveEvidence(),
-                    destination=destination,
-                )
-            self.assertEqual((verdict.status, verdict.reason), ("FAILED", "receipt_write_failed"))
-
-    def test_no_typed_spawn_is_classified_only_after_valid_parent_evidence(self) -> None:
-        events = parent_events()[:2]
-        verdict = inspect_dispatch(
-            events,
-            [],
-            expected_role=RoleBinding(model="gpt-5.6-luna", effort="low"),
-            expected_namespace="agents",
-        )
-        self.assertEqual(
-            (verdict.status, verdict.reason, verdict.route_observation),
-            ("FAILED", "requested_role_not_executed", "requested_role_not_executed"),
-        )
-
-        malformed = events + [{"type": "response_item", "payload": None}]
-        verdict = inspect_dispatch(
-            malformed,
-            [],
-            expected_role=RoleBinding(model="gpt-5.6-luna", effort="low"),
-            expected_namespace="agents",
-        )
-        self.assertEqual((verdict.status, verdict.reason), ("FAILED", "parent_evidence_invalid"))
-
-    def test_role_and_task_are_parameterized_consistently(self) -> None:
-        role = "security-executor"
-        task_name = task_name_for_role(role)
+def child_events(model: str = "gpt-5.6-luna", effort: str = "low") -> list[dict]:
+    return [{"type": "session_meta", "payload": {"id": CHILD, "parent_thread_id": PARENT}}, {"type": "turn_context", "payload": {"model": model, "effort": effort}}]
+
+
+def make_home(path: Path) -> None:
+    path.mkdir()
+    shutil.copy2(ROOT / "templates" / "config.snippet.toml", path / "config.toml")
+    shutil.copytree(ROOT / "templates" / "agents", path / "agents")
+    shutil.copy2(ROOT / "templates" / "agents-md.orchestration.md", path / "AGENTS.md")
+
+
+REAL_PUBLISH_NO_REPLACE = stage_smoke_home.publish_no_replace
+
+
+def publish_no_replace_fixture(
+    temporary: Path,
+    destination: Path,
+    active: Path,
+    source_snapshots,
+    projection_snapshot,
+) -> None:
+    """Exercise publication checks without requiring Darwin in unit tests."""
+    stage_smoke_home._revalidate_sources(source_snapshots)
+    stage_smoke_home._revalidate_projection(projection_snapshot)
+    active_required = stage_smoke_home._required_input_projection(active)
+    staged_required = stage_smoke_home._required_input_projection(temporary)
+    if active_required != staged_required:
+        raise StageError("required inputs changed before publication")
+    stage_smoke_home._revalidate_sources(source_snapshots)
+    try:
+        destination.lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        raise StageError("staged destination appeared during publication")
+    os.rename(temporary, destination)
+
+
+class NativeEvidenceTests(unittest.TestCase):
+    def test_live_command_allows_the_verified_clean_non_git_cwd(self) -> None:
         command = build_codex_command(
             codex_bin="codex",
-            cwd=ROOT,
-            mode="adapter",
+            cwd=Path("/tmp/clean-smoke"),
             parent_model="gpt-5.6-terra",
-            role=role,
-            task_name=task_name,
         )
-        self.assertIn(f"agent_type='{role}'", command[-1])
-        self.assertIn(f"task_name='{task_name}'", command[-1])
 
+        self.assertIn("--skip-git-repo-check", command)
+        self.assertIn("--strict-config", command)
+        self.assertEqual(command[command.index("-C") + 1], "/tmp/clean-smoke")
+        self.assertIn("wait_agent exactly once", command[-1])
+        self.assertIn("a second spawn", command[-1])
+
+    binding = RoleBinding("gpt-5.6-luna", "low")
+
+    def test_namespace_independent_typed_evidence_is_native_ok(self) -> None:
+        verdict = inspect_dispatch(parent_events(), child_events(), expected_role=self.binding)
+        self.assertEqual((verdict.status, verdict.reason_code, verdict.child_created), ("NATIVE_OK", "native_verified", "yes"))
+        self.assertEqual(len(verdict.parent_ref or ""), 16)
+        self.assertNotEqual(verdict.parent_ref, PARENT)
+
+    def test_service_tier_wins_over_missing_correlation(self) -> None:
+        args = {"message": "ready", "agent_type": "scout", "task_name": "model_probe_scout", "fork_turns": "none", "service_tier": "fast"}
+        events = parent_events(args)
+        events[-2]["payload"]["event_id"] = "other"
+        verdict = inspect_dispatch(events, [], expected_role=self.binding)
+        self.assertEqual((verdict.status, verdict.reason_code, verdict.phase), ("FAILED", "service_tier_override_forbidden", "dispatch"))
+
+    def test_untyped_and_policy_failures_are_fail_closed(self) -> None:
+        untyped = parent_events(); untyped.append({"type": "response_item", "payload": {"type": "function_call", "name": "spawn_untyped"}})
+        self.assertEqual(inspect_dispatch(untyped, [], expected_role=self.binding).reason_code, "untyped_fallback_detected")
+        bad = parent_events({"message": "", "agent_type": "scout", "task_name": "model_probe_scout", "fork_turns": "none"})
+        self.assertEqual(inspect_dispatch(bad, [], expected_role=self.binding).reason_code, "policy_violation")
+
+    def test_second_typed_spawn_is_a_policy_violation(self) -> None:
         events = parent_events()
-        arguments = json.loads(events[2]["payload"]["arguments"])
-        arguments.update({"agent_type": role, "task_name": task_name})
-        events[2]["payload"]["arguments"] = json.dumps(arguments)
-        events[3]["payload"]["agent_path"] = f"/root/{task_name}"
-        verdict = inspect_dispatch(
-            events,
-            child_events(),
-            expected_role=RoleBinding(model="gpt-5.6-luna", effort="low"),
-            expected_namespace="agents",
-            expected_role_name=role,
-            expected_task_name=task_name,
+        events.insert(3, dict(events[2], payload=dict(events[2]["payload"])))
+        verdict = inspect_dispatch(events, [], expected_role=self.binding)
+        self.assertEqual((verdict.status, verdict.reason_code), ("FAILED", "policy_violation"))
+
+    def test_wait_agent_evidence_is_exactly_once_and_after_spawn(self) -> None:
+        missing = parent_events()
+        missing.pop()
+        duplicate = parent_events()
+        duplicate.append(dict(duplicate[-1], payload=dict(duplicate[-1]["payload"])))
+        wrong_order = parent_events()
+        wrong_order.insert(2, wrong_order.pop())
+
+        self.assertEqual(
+            inspect_dispatch(missing, child_events(), expected_role=self.binding).reason_code,
+            "policy_violation",
         )
-        self.assertEqual(verdict.status, "ADAPTER_OK")
+        self.assertEqual(
+            inspect_dispatch(duplicate, child_events(), expected_role=self.binding).reason_code,
+            "policy_violation",
+        )
+        self.assertEqual(
+            inspect_dispatch(wrong_order, child_events(), expected_role=self.binding).reason_code,
+            "policy_violation",
+        )
 
-    def test_matrix_aggregates_seven_role_receipts_without_live_codex(self) -> None:
+    def test_evidence_absence_and_binding_mismatches_have_precise_reasons(self) -> None:
+        self.assertEqual(inspect_dispatch(parent_events()[:2], [], expected_role=self.binding).reason_code, "native_spawn_evidence_missing")
+        self.assertEqual(inspect_dispatch(parent_events(), [], expected_role=self.binding).reason_code, "child_evidence_missing")
+        self.assertEqual(inspect_dispatch(parent_events(), child_events(model="wrong"), expected_role=self.binding).reason_code, "child_model_mismatch")
+        self.assertEqual(inspect_dispatch(parent_events(), child_events(effort="medium"), expected_role=self.binding).reason_code, "child_effort_mismatch")
+        self.assertEqual(inspect_dispatch(parent_events(version="v1"), child_events(), expected_role=self.binding).reason_code, "native_v2_selection_mismatch")
+
+
+class NativeHomeAndReceiptTests(unittest.TestCase):
+    def test_home_pair_rejects_alias_and_nesting(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            home = Path(directory)
-            args = argparse.Namespace(
-                codex_bin="never-run",
-                codex_home=home,
-                repository_root=ROOT,
-                mode="adapter",
-                parent_model="gpt-5.6-terra",
-                receipt_dir=None,
-            )
-            destinations = {
-                role: prepare_receipt_destination(codex_home=home, role=role)
-                for role in verify_dispatch.ROLE_NAMES
-            }
-            binding = RoleBinding(model="gpt-5.6-luna", effort="low")
-            success = verify_dispatch._verdict("ADAPTER_OK", "verified_distinct_model")
-            with patch.object(verify_dispatch, "_preflight", return_value=(binding, None)), patch.object(
-                verify_dispatch, "_execute_live", return_value=(success, LiveEvidence())
-            ):
-                verdict = verify_dispatch._run_matrix(args, destinations)
+            root = Path(directory); active = root / "active"; staged = root / "staged"
+            make_home(active); make_home(staged)
+            self.assertEqual(validate_home_pair(active, staged), (active.resolve(), staged.resolve()))
+            with self.assertRaises(Exception):
+                validate_home_pair(active, active)
+            with self.assertRaises(Exception):
+                validate_home_pair(active, active / "nested")
 
-            self.assertEqual((verdict.status, verdict.reason), ("ADAPTER_OK", "matrix_verified_all_roles"))
-            receipts = list((home / "dispatch-receipts").glob("*.json"))
-            self.assertEqual(len(receipts), len(verify_dispatch.ROLE_NAMES) + 1)
-
-    def test_matrix_preflights_all_roles_then_stops_at_first_probe_failure(self) -> None:
+    def test_layout_allowlist_and_external_resource_rejection(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            home = Path(directory)
-            args = argparse.Namespace(
-                codex_bin="never-run",
-                codex_home=home,
-                repository_root=ROOT,
-                mode="adapter",
-                parent_model="gpt-5.6-terra",
-                receipt_dir=None,
-            )
-            destinations = {
-                role: prepare_receipt_destination(codex_home=home, role=role)
-                for role in verify_dispatch.ROLE_NAMES
-            }
-            binding = RoleBinding(model="gpt-5.6-luna", effort="low")
-            success = verify_dispatch._verdict("ADAPTER_OK", "verified_distinct_model")
-            failure = verify_dispatch._verdict("FAILED", "child_model_mismatch")
-            with patch.object(
-                verify_dispatch, "_preflight", return_value=(binding, None)
-            ) as preflight, patch.object(
-                verify_dispatch,
-                "_execute_live",
-                side_effect=[(success, LiveEvidence()), (failure, LiveEvidence())],
-            ) as execute:
-                verdict = verify_dispatch._run_matrix(args, destinations)
+            home = Path(directory) / "home"; make_home(home)
+            self.assertIsNone(validate_stage_layout(home))
+            (home / "untrusted.txt").write_text("x")
+            self.assertEqual(validate_stage_layout(home), "stage_layout_untrusted")
+            (home / "untrusted.txt").unlink()
+            (home / "config.toml").write_text('[mcp_servers.x]\ncommand = "/bin/evil"\n')
+            self.assertEqual(validate_stage_layout(home), "external_input_unowned")
 
-            self.assertEqual((verdict.status, verdict.reason), ("FAILED", "matrix_role_failed"))
-            self.assertEqual(preflight.call_count, len(verify_dispatch.ROLE_NAMES))
-            self.assertEqual(execute.call_count, 2)
-            manifest = next((home / "dispatch-receipts").glob("dispatch-matrix-*.json"))
-            self.assertEqual(len(json.loads(manifest.read_text())["roles"]), len(verify_dispatch.ROLE_NAMES))
-
-
-class DispatchLiveContractTests(unittest.TestCase):
-    def test_role_binding_reads_only_model_and_effort(self) -> None:
+    def test_active_config_projection_rejects_any_role_declaration(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "scout.toml"
-            path.write_text(
-                """
-name = "scout"
-model = "gpt-5.6-luna"
-model_reasoning_effort = "low"
-developer_instructions = "ignored by binding reader"
-""".lstrip(),
-                encoding="utf-8",
-            )
+            root = Path(directory)
+            active = root / "active"
+            make_home(active)
+            with (active / "config.toml").open("a", encoding="utf-8") as config:
+                config.write('\n[agents.rogue]\ndescription = "unapproved"\n')
 
             self.assertEqual(
-                read_role_binding(path),
-                RoleBinding(model="gpt-5.6-luna", effort="low"),
+                validate_stage_layout(active, active_home=True),
+                "role_layer_unapproved",
             )
+            with self.assertRaisesRegex(StageError, "required native V2"):
+                materialize(active, root / "staged")
+            self.assertFalse((root / "staged").exists())
 
-    def test_role_binding_rejects_missing_or_invalid_values(self) -> None:
+    def test_preflight_projects_unknown_active_metadata_but_rejects_staged_copy(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "scout.toml"
-            path.write_text('model = "gpt-5.6-luna"\n', encoding="utf-8")
-            with self.assertRaises(EvidenceError):
-                read_role_binding(path)
-
-    def test_adapter_and_native_commands_isolate_the_transport(self) -> None:
-        adapter = build_codex_command(
-            codex_bin="codex",
-            cwd=ROOT,
-            mode="adapter",
-            parent_model="gpt-5.6-terra",
-        )
-        native = build_codex_command(
-            codex_bin="codex",
-            cwd=ROOT,
-            mode="native",
-            parent_model="gpt-5.6-terra",
-        )
-
-        self.assertIn("--json", adapter)
-        self.assertIn("--strict-config", adapter)
-        self.assertNotIn("--ignore-user-config", adapter)
-        self.assertIn("agents.spawn_agent", adapter[-1])
-        self.assertIn("agent_type='scout'", adapter[-1])
-        self.assertIn("fork_turns='none'", adapter[-1])
-        self.assertIn("use only agent lifecycle tools", adapter[-1])
-        self.assertIn("without calling non-lifecycle tools", adapter[-1])
-        self.assertNotIn("Do not call any other tools", adapter[-1])
-
-        self.assertIn("--ignore-user-config", native)
-        self.assertNotIn(
-            "features.multi_agent_v2.hide_spawn_agent_metadata=false",
-            native,
-        )
-        self.assertIn("collaboration.spawn_agent", native[-1])
-        self.assertNotIn("agents.spawn_agent", native[-1])
-
-    def test_native_live_probe_skips_before_quota_without_schema_introspection(self) -> None:
-        stdout = io.StringIO()
-        stderr = io.StringIO()
-
-        with redirect_stdout(stdout), redirect_stderr(stderr):
-            result = verify_main(
-                [
-                    "--live",
-                    "--yes",
-                    "--mode",
-                    "native",
-                    "--codex-bin",
-                    "must-not-be-called",
-                ]
+            root = Path(directory); active = root / "active"; staged = root / "staged"
+            make_home(active); make_home(staged)
+            metadata_name = ".codex-global-state.json"
+            (active / metadata_name).write_text("runtime-state")
+            smoke_cwd = root / "smoke"; smoke_cwd.mkdir()
+            args = Namespace(
+                active_codex_home=active,
+                codex_home=staged,
+                repository_root=ROOT,
+                codex_cwd=smoke_cwd,
+                role="scout",
+                parent_model="gpt-5.6-sol",
             )
 
-        self.assertEqual(result, 2)
-        self.assertIn(
-            "SKIPPED reason=native_schema_introspection_unavailable",
-            stdout.getvalue(),
-        )
-        self.assertNotIn("spends real model quota", stderr.getvalue())
+            self.assertIsInstance(verify_dispatch._preflight(args), tuple)
+            (staged / metadata_name).write_text("runtime-state")
+            original_hash_inputs = verify_dispatch.hash_inputs
 
-    def test_native_skip_precedes_receipt_destination_validation(self) -> None:
-        stdout = io.StringIO()
-        stderr = io.StringIO()
-        with redirect_stdout(stdout), redirect_stderr(stderr):
-            result = verify_main(
-                [
-                    "--live",
-                    "--yes",
-                    "--mode",
-                    "native",
-                    "--receipt",
-                    "/tmp/outside.json",
-                    "--codex-bin",
-                    "must-not-be-called",
-                ]
-            )
-        self.assertEqual(result, 2)
-        self.assertEqual(
-            stdout.getvalue().strip(),
-            "SKIPPED reason=native_schema_introspection_unavailable",
-        )
-        self.assertNotIn("receipt destination failed", stderr.getvalue())
+            def reject_untrusted_staged_hash(home: Path):
+                if home.resolve() == staged.resolve():
+                    raise AssertionError("untrusted staged metadata was hashed")
+                return original_hash_inputs(home)
 
-    def test_destination_failure_stops_before_preflight_or_quota(self) -> None:
-        stdout = io.StringIO()
-        stderr = io.StringIO()
+            with patch(
+                "verify_dispatch.hash_inputs",
+                side_effect=reject_untrusted_staged_hash,
+            ):
+                result = verify_dispatch._preflight(args)
+
+            self.assertIsInstance(result, verify_dispatch.Verdict)
+            self.assertEqual(result.reason_code, "stage_layout_untrusted")
+
+    def test_receipt_keys_hashes_and_matrix_are_strict(self) -> None:
+        verdict = inspect_dispatch(parent_events(), child_events(), expected_role=RoleBinding("gpt-5.6-luna", "low"))
+        hashes = {"config": "a" * 64, "role_manifest": "b" * 64, "policy": "c" * 64}
+        payload = receipt_payload(verdict, codex_version="0.145.0", active=hashes, target=hashes)
+        validate_receipt(payload)
+        self.assertTrue(set(payload) <= verify_dispatch.RECEIPT_KEYS)
+        payload["raw_id"] = PARENT
+        with self.assertRaises(Exception):
+            validate_receipt(payload)
+
+    def test_receipt_rejects_impossible_execution_and_native_success_cells(self) -> None:
+        hashes = {"config": "a" * 64, "role_manifest": "b" * 64, "policy": "c" * 64}
+        with self.assertRaises(Exception):
+            receipt_payload(verify_dispatch._verdict("FAILED", "codex_exec_failed", phase="execution-pre-child", child_created="yes"), codex_version="0.145.0", active=hashes, target=hashes)
+        success = receipt_payload(inspect_dispatch(parent_events(), child_events(), expected_role=RoleBinding("gpt-5.6-luna", "low")), codex_version="0.145.0", active=hashes, target=hashes)
+        success["target_policy_sha256"] = "d" * 64
+        with self.assertRaises(Exception):
+            validate_receipt(success)
+
+    def test_receipts_require_all_hashes_and_redacted_preflight_shape(self) -> None:
+        hashes = {"config": "a" * 64, "role_manifest": "b" * 64, "policy": "c" * 64}
+        verdict = verify_dispatch._verdict("SKIPPED", "native_schema_introspection_unavailable", phase="preflight", child_created="no")
+        payload = receipt_payload(verdict, codex_version="unknown", active=hashes, target=hashes)
+        validate_receipt(payload)
+        del payload["target_policy_sha256"]
+        with self.assertRaises(Exception):
+            validate_receipt(payload)
+
+    def test_missing_hashed_input_is_not_an_empty_manifest_hash(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            with redirect_stdout(stdout), redirect_stderr(stderr):
-                result = verify_main(
-                    [
-                        "--live",
-                        "--yes",
-                        "--codex-home",
-                        directory,
-                        "--receipt",
-                        "/tmp/outside.json",
-                        "--codex-bin",
-                        "must-not-be-called",
-                    ]
-                )
+            home = Path(directory) / "home"; home.mkdir()
+            with self.assertRaises(Exception):
+                hash_inputs(home)
+
+    def test_missing_one_required_role_is_hash_input_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"; make_home(home)
+            (home / "agents" / "scout.toml").unlink()
+            with self.assertRaises(Exception):
+                hash_inputs(home)
+
+    def test_hash_inputs_rejects_required_input_symlinks_without_reading_target(self) -> None:
+        relative_inputs = (
+            Path("config.toml"),
+            Path("AGENTS.md"),
+            Path("agents/scout.toml"),
+        )
+        for relative in relative_inputs:
+            with (
+                self.subTest(input=relative.as_posix()),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                home = root / "home"
+                make_home(home)
+                outside = root / "outside"
+                outside.write_bytes(b"must-not-read")
+                source = home / relative
+                source.unlink()
+                source.symlink_to(outside)
+                original_open = os.open
+
+                def reject_outside_open(path, flags, mode=0o777, *, dir_fd=None):
+                    if Path(path) == outside:
+                        raise AssertionError("external symlink target was read")
+                    if dir_fd is None:
+                        return original_open(path, flags, mode)
+                    return original_open(path, flags, mode, dir_fd=dir_fd)
+
+                with patch(
+                    "verify_dispatch.os.open",
+                    side_effect=reject_outside_open,
+                ):
+                    with self.assertRaises(verify_dispatch.ReceiptError):
+                        hash_inputs(home)
+
+    def test_hash_inputs_rejects_required_input_mutation_between_reads(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            make_home(home)
+            config = home / "config.toml"
+            original = verify_dispatch._role_manifest
+
+            def mutate_before_manifest(manifest_home: Path):
+                config.write_bytes(config.read_bytes() + b"\n")
+                return original(manifest_home)
+
+            with patch(
+                "verify_dispatch._role_manifest",
+                side_effect=mutate_before_manifest,
+            ):
+                with self.assertRaisesRegex(
+                    verify_dispatch.ReceiptError,
+                    "mutated",
+                ):
+                    hash_inputs(home)
+
+    def test_retired_cli_options_fail_before_any_home_or_receipt(self) -> None:
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            result = verify_dispatch.main(["--mode", "native"])
         self.assertEqual(result, 1)
-        self.assertEqual(stdout.getvalue().strip(), "FAILED reason=receipt_destination_invalid")
-        self.assertIn("receipt destination failed:", stderr.getvalue())
-        self.assertNotIn("spends real model quota", stderr.getvalue())
+        self.assertIn("cli_input_invalid", stderr.getvalue())
 
-    def test_failed_preflight_prints_cost_safety_warning(self) -> None:
-        stdout = io.StringIO()
-        stderr = io.StringIO()
 
+class StageSmokeHomeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.publisher_patch = patch(
+            "stage_smoke_home.publish_no_replace",
+            new=publish_no_replace_fixture,
+        )
+        self.publisher_patch.start()
+        self.addCleanup(self.publisher_patch.stop)
+
+    def test_production_publisher_fails_closed_off_darwin(self) -> None:
+        with (
+            patch.object(stage_smoke_home.sys, "platform", "linux"),
+            self.assertRaisesRegex(
+                StageError,
+                "atomic no-replace publication is unavailable",
+            ),
+        ):
+            REAL_PUBLISH_NO_REPLACE(
+                Path("/unused/temporary"),
+                Path("/unused/destination"),
+                Path("/unused/active"),
+                (),
+                (),
+            )
+
+    def test_active_root_runtime_metadata_is_projected_out_without_inspection(self) -> None:
+        metadata_names = (
+            ".DS_Store",
+            ".app-server-state-reconciled-v1",
+            ".codex-global-state.json",
+            ".codex-global-state.json.bak",
+            "..codex-global-state.json.tmp-writer-1",
+            ".future-runtime-metadata",
+        )
         with tempfile.TemporaryDirectory() as directory:
-            with redirect_stdout(stdout), redirect_stderr(stderr):
-                result = verify_main(
-                    [
-                        "--live",
-                        "--yes",
-                        "--codex-home",
-                        directory,
-                        "--repository-root",
-                        str(ROOT),
-                    ]
+            root = Path(directory); active = root / "active"; staged = root / "staged"
+            make_home(active)
+            active_real = active.resolve()
+            sentinels = {
+                name: f"must-not-stage:{index}:{name}".encode()
+                for index, name in enumerate(metadata_names)
+            }
+            for name, content in sentinels.items():
+                (active / name).write_bytes(content)
+            ignored_directory = active / ".future-runtime-directory"
+            ignored_directory.mkdir()
+            nested_sentinel = b"must-not-stage:nested-runtime-metadata"
+            (ignored_directory / "private-state").write_bytes(nested_sentinel)
+            outside = root / "outside-runtime-state"
+            outside.write_bytes(b"must-not-stage:external-runtime-metadata")
+            ignored_symlink = active / ".future-runtime-symlink"
+            ignored_symlink.symlink_to(outside)
+            ignored_fifo = active / ".future-runtime-fifo"
+            os.mkfifo(ignored_fifo)
+            ignored_root_names = set(sentinels) | {
+                ignored_directory.name,
+                ignored_symlink.name,
+                ignored_fifo.name,
+            }
+
+            original_lstat = Path.lstat
+            original_path_open = Path.open
+            original_open = os.open
+
+            def reject_metadata_lstat(path: Path):
+                if path.parent == active_real and path.name in ignored_root_names:
+                    raise AssertionError(f"metadata was inspected: {path.name}")
+                return original_lstat(path)
+
+            def reject_metadata_open(path, flags, mode=0o777, *, dir_fd=None):
+                candidate = Path(path)
+                if candidate.parent == active_real and candidate.name in ignored_root_names:
+                    raise AssertionError(f"metadata bytes were read: {candidate.name}")
+                if dir_fd is None:
+                    return original_open(path, flags, mode)
+                return original_open(path, flags, mode, dir_fd=dir_fd)
+
+            def reject_metadata_path_open(path: Path, *args, **kwargs):
+                if path.parent == active_real and path.name in ignored_root_names:
+                    raise AssertionError(f"metadata bytes were read: {path.name}")
+                return original_path_open(path, *args, **kwargs)
+
+            with (
+                patch.object(Path, "lstat", new=reject_metadata_lstat),
+                patch.object(Path, "open", new=reject_metadata_path_open),
+                patch("stage_smoke_home.os.open", side_effect=reject_metadata_open),
+            ):
+                self.assertIsNone(validate_stage_layout(active, active_home=True))
+                active_hashes = hash_inputs(active)
+                materialize(active, staged)
+
+            self.assertEqual(active_hashes, hash_inputs(staged))
+            self.assertEqual(
+                {path.name for path in staged.iterdir()},
+                {"config.toml", "agents", "AGENTS.md"},
+            )
+            staged_bytes = b"".join(
+                path.read_bytes()
+                for path in staged.rglob("*")
+                if path.is_file()
+            )
+            for content in sentinels.values():
+                self.assertNotIn(content, staged_bytes)
+            self.assertNotIn(nested_sentinel, staged_bytes)
+            self.assertNotIn(outside.read_bytes(), staged_bytes)
+
+    def test_unknown_root_metadata_is_rejected_from_the_staged_home(self) -> None:
+        metadata_names = (
+            ".DS_Store",
+            ".app-server-state-reconciled-v1",
+            ".codex-global-state.json",
+            ".codex-global-state.json.bak",
+            "..codex-global-state.json.tmp-writer-1",
+            ".future-runtime-metadata",
+        )
+        for name in metadata_names:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                staged = Path(directory) / "staged"
+                make_home(staged)
+                (staged / name).write_bytes(b"unapproved")
+
+                self.assertEqual(
+                    validate_stage_layout(staged),
+                    "stage_layout_untrusted",
                 )
 
-        self.assertEqual(result, 1)
-        self.assertEqual(
-            stdout.getvalue().strip(),
-            "FAILED reason=role_preflight_failed",
-        )
-        self.assertIn("role preflight failed:", stderr.getvalue())
-        self.assertIn("role file not found:", stderr.getvalue())
-        self.assertIn("stop named-role dispatch", stderr.getvalue())
-        self.assertNotIn("spends real model quota", stderr.getvalue())
-
-    def test_exec_failures_distinguish_unavailable_prerequisites(self) -> None:
-        auth = classify_exec_failure(stdout="", stderr="Not logged in")
-        model = classify_exec_failure(
-            stdout="",
-            stderr="Requested model is unavailable",
-        )
-        runtime = classify_exec_failure(stdout="", stderr="unexpected failure")
-
-        self.assertEqual(
-            (auth.status, auth.reason),
-            ("SKIPPED", "auth_unavailable"),
-        )
-        self.assertEqual(
-            (model.status, model.reason),
-            ("SKIPPED", "parent_model_unavailable"),
-        )
-        self.assertEqual(
-            (runtime.status, runtime.reason),
-            ("FAILED", "codex_exec_failed"),
-        )
-
-    def test_day_lookup_covers_the_inclusive_bounded_range(self) -> None:
-        from datetime import datetime, timezone
-
-        root = Path("/sessions")
-        started = datetime(2026, 7, 15, 23, 59, tzinfo=timezone.utc)
-        ended = datetime(2026, 7, 17, 0, 1, tzinfo=timezone.utc)
-
-        directories = candidate_day_directories(root, started, ended)
-
-        self.assertEqual(
-            directories,
-            [
-                root / "2026" / "07" / "15",
-                root / "2026" / "07" / "16",
-                root / "2026" / "07" / "17",
-            ],
-        )
-
-    def test_live_probe_requires_two_explicit_opt_ins(self) -> None:
-        stdout = io.StringIO()
-        with redirect_stdout(stdout):
-            result = verify_main([])
-        self.assertEqual(result, 2)
-        self.assertIn("SKIPPED reason=live_flag_required", stdout.getvalue())
-
-        stdout = io.StringIO()
-        with redirect_stdout(stdout):
-            result = verify_main(["--live"])
-        self.assertEqual(result, 2)
-        self.assertIn("SKIPPED reason=operator_opt_in_required", stdout.getvalue())
-
-    def test_preflight_rejects_role_drift_before_codex_or_quota(self) -> None:
+    def test_known_runtime_metadata_is_ignored_without_inspection(self) -> None:
+        runtime_files = {
+            "history.jsonl",
+            "models_cache.json",
+            "version.json",
+            "state_5.sqlite",
+            "state_5.sqlite-wal",
+            "state_5.sqlite-shm",
+        }
+        runtime_directories = {
+            "log",
+            "sessions",
+            "shell_snapshots",
+            "dispatch-receipts",
+        }
         with tempfile.TemporaryDirectory() as directory:
-            codex_home = Path(directory)
-            agents = codex_home / "agents"
-            agents.mkdir()
-            installed = agents / "scout.toml"
-            shutil.copy2(ROOT / "templates" / "agents" / "scout.toml", installed)
-            content = installed.read_text(encoding="utf-8")
-            installed.write_text(
-                content.replace(
-                    "Report the direct answer",
-                    "Report a direct answer",
+            root = Path(directory)
+            active = root / "active"
+            staged = root / "staged"
+            make_home(active)
+            (active / "auth.json").write_text("credential")
+            for name in runtime_files:
+                (active / name).write_bytes(f"ignored:{name}".encode())
+            for name in runtime_directories:
+                runtime_directory = active / name
+                runtime_directory.mkdir()
+                (runtime_directory / "sentinel").write_bytes(
+                    f"ignored:{name}".encode()
+                )
+            outside = root / "outside-runtime"
+            outside.write_bytes(b"ignored:tmp")
+            (active / "tmp").symlink_to(outside)
+            ignored_names = runtime_files | runtime_directories | {"tmp"}
+            active_real = active.resolve()
+            original_lstat = Path.lstat
+
+            def reject_runtime_lstat(path: Path):
+                if path.parent == active_real and path.name in ignored_names:
+                    raise AssertionError(f"runtime metadata was inspected: {path.name}")
+                return original_lstat(path)
+
+            with patch.object(Path, "lstat", new=reject_runtime_lstat):
+                self.assertIsNone(validate_stage_layout(active, active_home=True))
+                materialize(active, staged)
+
+            self.assertEqual(
+                {path.name for path in staged.iterdir()},
+                {"config.toml", "agents", "AGENTS.md", "auth.json"},
+            )
+            self.assertTrue(ignored_names.isdisjoint(path.name for path in staged.iterdir()))
+            self.assertEqual(hash_inputs(active), hash_inputs(staged))
+
+    def test_staging_projects_only_required_native_v2_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            active = root / "active"
+            staged = root / "staged"
+            make_home(active)
+            with (active / "config.toml").open("a", encoding="utf-8") as config:
+                config.write(
+                    '\n[mcp_servers.external]\ncommand = "/bin/ignored"\n'
+                    '\n[projects."/outside"]\ntrust_level = "trusted"\n'
+                )
+
+            self.assertIsNone(validate_stage_layout(active, active_home=True))
+            materialize(active, staged)
+
+            self.assertEqual(
+                (staged / "config.toml").read_bytes(),
+                stage_smoke_home.SMOKE_CONFIG,
+            )
+            self.assertNotIn(b"/bin/ignored", (staged / "config.toml").read_bytes())
+            self.assertEqual(hash_inputs(active), hash_inputs(staged))
+            self.assertIsNone(validate_stage_layout(staged))
+
+    def test_required_projected_inputs_reject_symlinks_and_special_files(self) -> None:
+        relative_inputs = (
+            Path("config.toml"),
+            Path("AGENTS.md"),
+            Path("agents/scout.toml"),
+            Path("auth.json"),
+        )
+        replacements = (
+            (
+                "external symlink",
+                lambda path, root: path.symlink_to(root / "outside"),
+            ),
+            ("fifo", lambda path, _root: os.mkfifo(path)),
+        )
+        for relative in relative_inputs:
+            for label, replace in replacements:
+                with (
+                    self.subTest(input=relative.as_posix(), hazard=label),
+                    tempfile.TemporaryDirectory() as directory,
+                ):
+                    root = Path(directory)
+                    active = root / "active"
+                    make_home(active)
+                    outside = root / "outside"
+                    outside.write_bytes(b"external")
+                    source = active / relative
+                    source.unlink(missing_ok=True)
+                    replace(source, root)
+
+                    self.assertEqual(
+                        validate_stage_layout(active, active_home=True),
+                        "stage_layout_untrusted",
+                    )
+                    with self.assertRaises(StageError):
+                        materialize(active, root / "staged")
+
+    def test_required_projected_inputs_reject_unreadable_files(self) -> None:
+        relative_inputs = (
+            Path("config.toml"),
+            Path("AGENTS.md"),
+            Path("agents/scout.toml"),
+            Path("auth.json"),
+        )
+        for relative in relative_inputs:
+            with (
+                self.subTest(input=relative.as_posix()),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                active = root / "active"
+                make_home(active)
+                source = active / relative
+                if not source.exists():
+                    source.write_bytes(b"runtime")
+                source.chmod(0)
+                try:
+                    self.assertEqual(
+                        validate_stage_layout(active, active_home=True),
+                        "stage_layout_untrusted",
+                    )
+                    with self.assertRaises(StageError):
+                        materialize(active, root / "staged")
+                finally:
+                    source.chmod(0o600)
+
+    def test_required_projected_inputs_reject_copy_time_mutation(self) -> None:
+        relative_inputs = (
+            Path("config.toml"),
+            Path("AGENTS.md"),
+            Path("agents/scout.toml"),
+            Path("auth.json"),
+        )
+        for relative in relative_inputs:
+            with (
+                self.subTest(input=relative.as_posix()),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                active = root / "active"
+                make_home(active)
+                source_to_mutate = active / relative
+                if not source_to_mutate.exists():
+                    source_to_mutate.write_bytes(b"runtime")
+                source_to_mutate = source_to_mutate.resolve()
+                original = stage_smoke_home._regular_source
+                mutated = False
+
+                def mutate_after_stat(source: Path, confined_home: Path):
+                    nonlocal mutated
+                    before = original(source, confined_home)
+                    if source == source_to_mutate and not mutated:
+                        source.write_bytes(source.read_bytes() + b"\n")
+                        mutated = True
+                    return before
+
+                with patch(
+                    "stage_smoke_home._regular_source",
+                    side_effect=mutate_after_stat,
+                ):
+                    with self.assertRaisesRegex(
+                        StageError,
+                        "replaced while staging",
+                    ):
+                        materialize(active, root / "staged")
+
+                self.assertTrue(mutated)
+                self.assertFalse((root / "staged").exists())
+                self.assertEqual(
+                    list(root.glob(".staged.pilotfish-stage-*")),
+                    [],
+                )
+
+    def test_required_source_mutation_before_publication_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            active = root / "active"
+            make_home(active)
+            source = active / "config.toml"
+            original = stage_smoke_home._revalidate_sources
+
+            def mutate_before_revalidation(snapshots):
+                source.write_bytes(source.read_bytes() + b"\n")
+                original(snapshots)
+
+            with patch(
+                "stage_smoke_home._revalidate_sources",
+                side_effect=mutate_before_revalidation,
+            ):
+                with self.assertRaisesRegex(
+                    StageError,
+                    "changed before staging publication",
+                ):
+                    materialize(active, root / "staged")
+
+            self.assertFalse((root / "staged").exists())
+            self.assertEqual(list(root.glob(".staged.pilotfish-stage-*")), [])
+
+    def test_required_role_mutation_at_publication_seam_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            active = root / "active"
+            make_home(active)
+            role = active / "agents" / "scout.toml"
+            original = stage_smoke_home._revalidate_projection
+            mutated = False
+
+            def mutate_during_projection(snapshot):
+                nonlocal mutated
+                original(snapshot)
+                if not mutated:
+                    role.write_bytes(role.read_bytes() + b"\n# late mutation\n")
+                    mutated = True
+
+            with patch(
+                "stage_smoke_home._revalidate_projection",
+                side_effect=mutate_during_projection,
+            ):
+                with self.assertRaisesRegex(
+                    StageError,
+                    "required inputs changed before publication",
+                ):
+                    materialize(active, root / "staged")
+
+            self.assertTrue(mutated)
+            self.assertFalse((root / "staged").exists())
+            self.assertEqual(list(root.glob(".staged.pilotfish-stage-*")), [])
+
+    def test_required_input_appearance_before_publication_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            active = root / "active"
+            make_home(active)
+            original = stage_smoke_home._revalidate_sources
+
+            def add_second_policy_after_copy(snapshots):
+                original(snapshots)
+                (active / "AGENTS.override.md").write_text("late policy")
+
+            with patch(
+                "stage_smoke_home._revalidate_sources",
+                side_effect=add_second_policy_after_copy,
+            ):
+                with self.assertRaisesRegex(
+                    StageError,
+                    "active projection changed before publication",
+                ):
+                    materialize(active, root / "staged")
+
+            self.assertFalse((root / "staged").exists())
+            self.assertEqual(list(root.glob(".staged.pilotfish-stage-*")), [])
+
+    def test_staging_copies_only_allowlisted_inputs_atomically(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); active = root / "active"; staged = root / "staged"
+            make_home(active); (active / "auth.json").write_text("credential")
+            stamp = "20260716-001307"
+            (active / f"config.toml.pilotfish-codex-{stamp}").write_text("previous")
+            (active / "agents" / f"scout.toml.pilotfish-codex-{stamp}").write_text("previous")
+            result = materialize(active, staged)
+            self.assertEqual(result, staged.resolve())
+            self.assertTrue((staged / "auth.json").exists())
+            self.assertEqual({p.name for p in staged.iterdir()}, {"config.toml", "agents", "AGENTS.md", "auth.json"})
+            self.assertEqual({path.name for path in (staged / "agents").iterdir()}, {f"{role}.toml" for role in verify_dispatch.ROLES})
+            self.assertIsNone(validate_stage_layout(staged))
+
+    def test_staging_rejects_existing_and_nested_destinations(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); active = root / "active"; make_home(active)
+            existing = root / "existing"; existing.mkdir()
+            with self.assertRaises(StageError): materialize(active, existing)
+            with self.assertRaises(StageError): materialize(active, active / "nested")
+
+    def test_unhashed_agent_entry_is_rejected_by_stager_and_layout_validator(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); active = root / "active"; make_home(active)
+            (active / "agents" / "unhashed-policy.txt").write_text("unapproved")
+            staged = root / "staged"
+
+            with self.assertRaisesRegex(StageError, "unapproved"):
+                materialize(active, staged)
+
+            self.assertFalse(staged.exists())
+            self.assertEqual(validate_stage_layout(active), "stage_layout_untrusted")
+
+    def test_staging_cleanup_retry_removes_sensitive_temporary_data(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); active = root / "active"; make_home(active)
+            (active / "auth.json").write_text("credential")
+            with (
+                patch(
+                    "stage_smoke_home.publish_no_replace",
+                    side_effect=StageError("publication blocked"),
                 ),
-                encoding="utf-8",
-            )
-            shutil.copy2(
-                ROOT / "templates" / "config.snippet.toml",
-                codex_home / "config.toml",
-            )
-            stdout = io.StringIO()
-            stderr = io.StringIO()
-
-            with redirect_stdout(stdout), redirect_stderr(stderr):
-                result = verify_main(
-                    [
-                        "--live",
-                        "--yes",
-                        "--codex-home",
-                        str(codex_home),
-                        "--codex-bin",
-                        "must-not-be-called",
-                    ]
-                )
-
-        self.assertEqual(result, 1)
-        self.assertIn("FAILED reason=installed_role_drift", stdout.getvalue())
-        self.assertNotIn("spends real model quota", stderr.getvalue())
-
-    def test_concurrency_one_skips_before_codex_or_quota(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            codex_home = Path(directory)
-            agents = codex_home / "agents"
-            agents.mkdir()
-            shutil.copy2(
-                ROOT / "templates" / "agents" / "scout.toml",
-                agents / "scout.toml",
-            )
-            config = (ROOT / "templates" / "config.snippet.toml").read_text(
-                encoding="utf-8"
-            )
-            (codex_home / "config.toml").write_text(
-                config.replace(
-                    "max_concurrent_threads_per_session = 4",
-                    "max_concurrent_threads_per_session = 1",
+                patch(
+                    "stage_smoke_home.shutil.rmtree",
+                    side_effect=OSError("blocked"),
                 ),
-                encoding="utf-8",
-            )
-            stdout = io.StringIO()
-            stderr = io.StringIO()
-
-            with redirect_stdout(stdout), redirect_stderr(stderr):
-                result = verify_main(
-                    [
-                        "--live",
-                        "--yes",
-                        "--codex-home",
-                        str(codex_home),
-                        "--codex-bin",
-                        "must-not-be-called",
-                    ]
-                )
-
-        self.assertEqual(result, 2)
-        self.assertIn("SKIPPED reason=child_delegation_disabled", stdout.getvalue())
-        self.assertNotIn("spends real model quota", stderr.getvalue())
+            ):
+                with self.assertRaisesRegex(StageError, "publication blocked"):
+                    materialize(active, root / "staged")
+            self.assertEqual(list(root.glob(".staged.pilotfish-stage-*")), [])
 
 
 if __name__ == "__main__":

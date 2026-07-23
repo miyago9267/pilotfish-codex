@@ -1,5 +1,8 @@
 # Dispatch Verification Gap Assessment
 
+> Historical adapter assessment. The current native boundary is tracked in
+> `codex-native-multi-agent-migration` and requires a later `NATIVE_OK` smoke.
+
 - Date: 2026-07-20
 - Scope: MultiAgentV2 named-role dispatch evidence
 - Related discussion: [#2 — Does role-based model dispatch actually fire?](https://github.com/miyago9267/pilotfish-codex/discussions/2)

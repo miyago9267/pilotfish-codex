@@ -1,6 +1,7 @@
 ---
 id: spec-subagent-service-tier-guard
 title: Sub-agent service tier guard
+historical_note: Namespace-specific examples are historical; the service-tier guard remains backend-neutral under the native migration.
 status: complete
 created: 2026-07-16
 updated: 2026-07-16

@@ -1,5 +1,8 @@
 # TESTS — dispatch-verification
 
+> Historical adapter acceptance record. These cases are excluded from the
+> active native gate in `codex-native-multi-agent-migration`.
+
 ## Headless mechanism proof
 
 - **AC-A1**: When the adapter E2E runs, `codex exec --json` shall expose one
