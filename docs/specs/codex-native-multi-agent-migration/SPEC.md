@@ -212,9 +212,11 @@ with `role_manifest_extra`.
 Filename/name mismatch is a local Pilotfish
 validator rule; Codex runtime discovery uses the TOML `name` field. Each of the
 seven same-name role files must match the packaged canonical TOML bytes
-exactly. A customized same-name role returns `installed_role_drift` and
-requires explicit replacement approval before the staged target can pass. The
-runbook-owned `install/stage_smoke_home.py` staging step shall accept
+exactly before staging. The installer may replace only exact release-pinned
+prior canonical bytes; a customized same-name role returns
+`installed_role_drift` and requires explicit replacement approval before the
+staged target can pass. The runbook-owned `install/stage_smoke_home.py` staging
+step shall accept
 `ACTIVE_CODEX_HOME` as its source and an absolute `STAGED_CODEX_HOME`
 destination that does not yet exist. Before creating any temporary directory,
 it shall canonicalize both homes and reject equal or nested canonical paths
@@ -859,9 +861,10 @@ The work has four separate approvals and must not collapse them into one:
    the exact-only `0.145.0` version boundary.
 2. **Home-write approval:** the operator authorizes backup and writes to a real
    Codex home, the sibling install-state sidecar and its transactional pending
-   file, any explicitly approved same-name role replacement, and any verified-
-   retired role cleanup; offline fixtures use a staged temporary home. General
-   home-write approval does not authorize replacement of a customized role.
+   file, any explicitly approved customized same-name role replacement, and any
+   verified-retired role cleanup; offline fixtures use a staged temporary home.
+   General home-write approval does not authorize replacement of a customized
+   role.
 3. **Quota approval:** set absolute, distinct `REPO_ROOT`, `SMOKE_DIR`,
    `ACTIVE_CODEX_HOME`, and `STAGED_CODEX_HOME`; `SMOKE_DIR` must be outside
    `REPO_ROOT`, and the two homes must not be equal. It must contain no

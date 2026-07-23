@@ -124,10 +124,11 @@
 1. Miyago approves this native-only `rust-v0.145.0` plan and its exact-only
    version boundary; lower and higher versions fail closed.
 2. The operator separately authorizes backup and writes to the real Codex home,
-   the sibling install-state sidecar, any explicitly approved same-name role
-   replacement, and verified-retired role cleanup; general home-write approval
-   does not authorize customized-role replacement. Offline tests use a staged
-   temporary home.
+   the sibling install-state sidecar, any explicitly approved customized
+   same-name role replacement, and verified-retired role cleanup; general
+   home-write approval does not authorize customized-role replacement. Exact
+   release-pinned prior canonical role bytes may upgrade automatically. Offline
+   tests use a staged temporary home.
 3. From a clean temporary working directory with no project-local Codex
    config, with absolute, distinct `REPO_ROOT`, `SMOKE_DIR`,
    `ACTIVE_CODEX_HOME`, and `STAGED_CODEX_HOME`, the operator first invokes

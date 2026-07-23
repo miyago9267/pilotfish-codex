@@ -27,6 +27,8 @@ are noted only as source references.
 - Run read-only security review before readiness for affected units. Apply the
   same two-verdict brake to materially revised completed-work claims after
   consecutive `REFUTED` results.
+- Permit exact release-pinned v1.3.0 verifier-role payloads to upgrade while
+  preserving fail-closed handling for customized same-name roles.
 
 ## v1.3.0 — 2026-07-20
 

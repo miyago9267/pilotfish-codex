@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -96,6 +97,40 @@ class NativeInstallTests(unittest.TestCase):
             agents = home / "agents"; agents.mkdir()
             (agents / "scout.toml").write_text('name = "scout"\n')
             with self.assertRaises(InstallAbort):
+                self.run_install(home)
+
+    def test_release_pinned_v130_roles_upgrade_but_custom_bytes_abort(self) -> None:
+        previous = ROOT / "install" / "previous" / "v1.3.0" / "agents"
+        expected = installer.CANONICAL_ROLE_UPGRADE_DIGESTS
+        for role in ("plan-verifier", "security-reviewer"):
+            payload = (previous / f"{role}.toml").read_bytes()
+            self.assertIn(hashlib.sha256(payload).hexdigest(), expected[role])
+
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            agents = home / "agents"
+            agents.mkdir(parents=True)
+            for role in installer.ROLES:
+                source = ROOT / "templates" / "agents" / f"{role}.toml"
+                prior = previous / f"{role}.toml"
+                (agents / f"{role}.toml").write_bytes(
+                    prior.read_bytes() if prior.exists() else source.read_bytes()
+                )
+
+            self.assertEqual(self.run_install(home), 0)
+            for role in ("plan-verifier", "security-reviewer"):
+                self.assertEqual(
+                    (agents / f"{role}.toml").read_bytes(),
+                    (ROOT / "templates" / "agents" / f"{role}.toml").read_bytes(),
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            agents = home / "agents"
+            agents.mkdir(parents=True)
+            payload = (previous / "plan-verifier.toml").read_bytes() + b"# custom\n"
+            (agents / "plan-verifier.toml").write_bytes(payload)
+            with self.assertRaisesRegex(InstallAbort, "installed_role_drift"):
                 self.run_install(home)
 
     def test_two_nonempty_policy_files_abort_before_write(self) -> None:

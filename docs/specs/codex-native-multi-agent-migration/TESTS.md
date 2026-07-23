@@ -47,9 +47,10 @@ high-precedence role with `description = "high"` and no config file; the
 expected merged result is description `"high"` with `config_file = "low.toml"`.
 None of these mixed-layer fixtures is an approved staged target. The validator
 shall not require `[agents.<role>] config_file` declarations. A same-name
-role whose TOML bytes differ from the packaged template returns
+role whose TOML bytes match a release-pinned prior canonical payload upgrades
+to the packaged template. Any other differing same-name role returns
 `FAILED: installed_role_drift` and cannot be native proof until explicit
-same-name replacement approval; general home-write approval alone is
+customized-role replacement approval; general home-write approval alone is
 insufficient.
 
 ### NATIVE-CONFIG-004

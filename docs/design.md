@@ -23,9 +23,11 @@ concurrency fallback.
 
 The role manifest is seven recursively discovered TOMLs. Pilotfish validates a
 single approved staged manifest and rejects duplicate names, filename/name
-mismatches, extra roles, path escape, and role drift. This local validation does
-not claim to duplicate Codex's layered loader, which may merge role data across
-layers. The native smoke instead requires a one-user-layer staged home.
+mismatches, extra roles, path escape, and role drift. Only release-pinned prior
+canonical bytes may upgrade automatically; customized same-name roles still
+fail closed. This local validation does not claim to duplicate Codex's layered
+loader, which may merge role data across layers. The native smoke instead
+requires a one-user-layer staged home.
 
 ## Policy and evidence
 
