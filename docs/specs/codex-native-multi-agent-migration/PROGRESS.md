@@ -92,8 +92,10 @@
 - [x] Installer transactions revalidate the active policy through commit;
   late creation of a second non-empty policy file fails closed, rolls back
   managed targets, and records an aborted pending state.
-- [x] Complete offline suite passed (76 tests), together with Python
+- [x] Complete offline suite passed (77 tests), together with Python
   compilation, role validation, diff checks, and migration Markdown checks.
+- [x] Linux CI uses a test-only no-replace publisher seam for staging logic;
+  production publication remains fail-closed outside Darwin.
 - [x] Headless live smoke passed on Codex `0.145.0` with
   `NATIVE_OK reason_code=native_verified phase=post-spawn child_created=yes`;
   the observed `scout` child used `gpt-5.6-luna` at `low` effort.

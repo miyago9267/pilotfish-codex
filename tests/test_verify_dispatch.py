@@ -47,6 +47,33 @@ def make_home(path: Path) -> None:
     shutil.copy2(ROOT / "templates" / "agents-md.orchestration.md", path / "AGENTS.md")
 
 
+REAL_PUBLISH_NO_REPLACE = stage_smoke_home.publish_no_replace
+
+
+def publish_no_replace_fixture(
+    temporary: Path,
+    destination: Path,
+    active: Path,
+    source_snapshots,
+    projection_snapshot,
+) -> None:
+    """Exercise publication checks without requiring Darwin in unit tests."""
+    stage_smoke_home._revalidate_sources(source_snapshots)
+    stage_smoke_home._revalidate_projection(projection_snapshot)
+    active_required = stage_smoke_home._required_input_projection(active)
+    staged_required = stage_smoke_home._required_input_projection(temporary)
+    if active_required != staged_required:
+        raise StageError("required inputs changed before publication")
+    stage_smoke_home._revalidate_sources(source_snapshots)
+    try:
+        destination.lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        raise StageError("staged destination appeared during publication")
+    os.rename(temporary, destination)
+
+
 class NativeEvidenceTests(unittest.TestCase):
     def test_live_command_allows_the_verified_clean_non_git_cwd(self) -> None:
         command = build_codex_command(
@@ -294,6 +321,30 @@ class NativeHomeAndReceiptTests(unittest.TestCase):
 
 
 class StageSmokeHomeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.publisher_patch = patch(
+            "stage_smoke_home.publish_no_replace",
+            new=publish_no_replace_fixture,
+        )
+        self.publisher_patch.start()
+        self.addCleanup(self.publisher_patch.stop)
+
+    def test_production_publisher_fails_closed_off_darwin(self) -> None:
+        with (
+            patch.object(stage_smoke_home.sys, "platform", "linux"),
+            self.assertRaisesRegex(
+                StageError,
+                "atomic no-replace publication is unavailable",
+            ),
+        ):
+            REAL_PUBLISH_NO_REPLACE(
+                Path("/unused/temporary"),
+                Path("/unused/destination"),
+                Path("/unused/active"),
+                (),
+                (),
+            )
+
     def test_active_root_runtime_metadata_is_projected_out_without_inspection(self) -> None:
         metadata_names = (
             ".DS_Store",
