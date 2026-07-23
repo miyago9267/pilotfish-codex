@@ -129,6 +129,48 @@ class PolicyTests(unittest.TestCase):
         self.assertNotIn("run_in_background", policy)
         self.assertNotIn("worktree", policy)
 
+    def test_verifier_contracts_converge_without_crossing_boundaries(self) -> None:
+        policy = (ROOT / "templates" / "agents-md.orchestration.md").read_text()
+        plan = (AGENTS / "plan-verifier.toml").read_text()
+        outcome = (AGENTS / "verifier.toml").read_text()
+        security = (AGENTS / "security-reviewer.toml").read_text()
+        normalized_policy = " ".join(policy.split())
+
+        for phrase in (
+            "program envelope",
+            "next executable slice",
+            "scope, non-goals",
+            "acceptance that proves the slice outcome",
+            "slice-local budget",
+            "stop conditions",
+            "Blocker:",
+            "Evidence:",
+            "Minimum revision:",
+            "Acceptance check:",
+            "use a fresh `plan-verifier`",
+            "two automatic `REVISE` verdicts for the same unit",
+            "surface the blockers and options to the user",
+            "substantially unchanged Plan",
+            "findings and dispositions into the Plan",
+            "two consecutive `REFUTED` verdicts for that claim",
+            "stop automatic fix-and-reverify",
+        ):
+            self.assertIn(phrase, normalized_policy)
+        self.assertNotIn("Plan epoch", policy)
+        self.assertNotIn("format-recovery", policy)
+
+        self.assertIn("Return exactly one form", plan)
+        self.assertIn("explicit outcome, scope and non-goals", plan)
+        self.assertIn("acceptance that proves the slice outcome", plan)
+        self.assertIn("a slice-local budget", plan)
+        self.assertIn("slice-local stop conditions", plan)
+        self.assertIn("completed security-reviewer findings", plan)
+        self.assertNotIn("CONFIRMED", plan)
+        self.assertNotIn("REFUTED", plan)
+        self.assertNotIn("READY", outcome)
+        self.assertNotIn("REVISE", outcome)
+        self.assertIn("first plan-verifier review", security)
+
 
 if __name__ == "__main__":
     unittest.main()

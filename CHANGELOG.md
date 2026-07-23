@@ -17,6 +17,19 @@ are noted only as source references.
   verifier. Historical adapter evidence remains archival and excluded from the
   native gate.
 
+## v1.3.1 — 2026-07-23
+
+- Add program envelopes and independently approvable execution slices; review
+  the envelope and next executable slice without blocking on unrelated work.
+- Require bare `READY` or structured `REVISE` with blocker evidence, minimum
+  revision, and an acceptance check. Stop automatic review after two revisions
+  for one unit and return unresolved choices to the user.
+- Run read-only security review before readiness for affected units. Apply the
+  same two-verdict brake to materially revised completed-work claims after
+  consecutive `REFUTED` results.
+- Permit exact release-pinned v1.3.0 verifier-role payloads to upgrade while
+  preserving fail-closed handling for customized same-name roles.
+
 ## v1.3.0 — 2026-07-20
 
 - Add redacted versioned dispatch receipts with atomic writes, path and hash

@@ -23,9 +23,11 @@ concurrency fallback.
 
 The role manifest is seven recursively discovered TOMLs. Pilotfish validates a
 single approved staged manifest and rejects duplicate names, filename/name
-mismatches, extra roles, path escape, and role drift. This local validation does
-not claim to duplicate Codex's layered loader, which may merge role data across
-layers. The native smoke instead requires a one-user-layer staged home.
+mismatches, extra roles, path escape, and role drift. Only release-pinned prior
+canonical bytes may upgrade automatically; customized same-name roles still
+fail closed. This local validation does not claim to duplicate Codex's layered
+loader, which may merge role data across layers. The native smoke instead
+requires a one-user-layer staged home.
 
 ## Policy and evidence
 
@@ -33,6 +35,19 @@ Policy constructs typed named-role requests with a non-empty message, installed
 `agent_type`, lowercase schema-safe task name, and `fork_turns = "none"` or
 `"1"` through `"3"`. It forbids full history for named roles, untyped retries,
 and child model, reasoning-effort, service-tier, and context overrides.
+
+### Plan readiness
+
+Large work keeps shared constraints in a program envelope and splits only
+independent execution slices. A fresh `plan-verifier` reviews the envelope,
+then the next executable slice. Bare `READY` opens the approval gate;
+structured `REVISE` carries blocker evidence and the smallest observable
+closure check.
+
+After two automatic revisions for one unit, the main session stops resubmitting
+it and returns the unresolved choices to the user. This does not make the unit
+ready or reset shared prerequisites. Security-sensitive units complete
+read-only security review before their first readiness pass.
 
 The verifier is post-hoc evidence classification, not a pre-execution cancel
 hook. Native proof requires observed V2 selection, one `spawn_agent` with exact

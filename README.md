@@ -37,6 +37,17 @@ Role TOMLs own their model and reasoning effort. The global policy owns typed
 role delegation, approval boundaries, and fresh-context verification. The
 Claude-specific `Explore` compatibility override is not installed.
 
+## Plan readiness
+
+Large Plans use one program envelope followed by independently approvable
+execution slices. Review the envelope, then only the next executable slice.
+`READY` is bare; `REVISE` identifies the blocker, evidence, minimum revision,
+and acceptance check. After two automatic revisions for one unit, stop and ask
+the user. Security-sensitive units complete read-only security review first,
+and `READY` never authorizes writes.
+
+See [Plan readiness](./docs/design.md#plan-readiness) for the design boundary.
+
 ## Install
 
 The scripted route checks the exact CLI version, plans all writes, creates

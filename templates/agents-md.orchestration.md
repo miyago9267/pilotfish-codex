@@ -1,5 +1,5 @@
 <!-- pilotfish-codex:begin -->
-<!-- pilotfish-codex v1.3.0 -->
+<!-- pilotfish-codex v1.3.1 -->
 <!-- markdownlint-disable-next-line MD041 -->
 ### Orchestration
 
@@ -56,10 +56,28 @@ this lifecycle:
 | Phase | Gate | Eligible delegation |
 |---|---|---|
 | Discovery | Stabilize the question, allowed scope, evidence format, and stop condition. The final implementation may remain unknown. | Bounded read-only `scout` work on disjoint evidence surfaces. |
-| Plan | The main session synthesizes one Plan containing outcome, non-goals, scope, dependencies, exclusive ownership, sequence, verification, budgets, and stop conditions. | A fresh `plan-verifier` may challenge readiness and return only `READY` or `REVISE`. |
+| Plan | The main session synthesizes one Plan. Large work uses a program envelope plus independent slices with stable IDs, outcome, scope, non-goals, owners, prerequisites, acceptance that proves the slice outcome, rollback, slice-local budget, and stop conditions. | A fresh `plan-verifier` reviews the envelope first, then only the next executable slice; main session owns revisions and final synthesis. |
 | Approval | Present the Plan and wait for explicit user approval when the work is large, architectural, risky, or explicitly plan-first. | Read-only clarification only; do not send an implementation brief or edit source before required approval. |
 | Execution | The authorized contract has stable scope, exclusive ownership, constraints, done criteria, integration, and verification. | `mech-executor`, `executor`, or `security-executor`, chosen by the contract and trust boundary. |
 | Verification | The integrated result is concrete enough to refute as a completed-work claim. | A fresh `verifier` returns only `CONFIRMED` or `REFUTED`. |
+
+A `plan-verifier` brief requests exactly bare `READY` or structured `REVISE`
+with `Blocker:`, `Evidence:`, `Minimum revision:`, and `Acceptance check:`
+fields for one stable envelope or slice. Malformed output is a protocol failure,
+not a Plan judgment.
+
+Review the envelope before its slices. By default, review only the next
+executable slice and seek approval as soon as both are `READY`; unrelated
+downstream slices do not block it. Shared blockers and unmet prerequisites
+still gate dependent work.
+
+For one readiness unit, materially revise after each valid `REVISE` and use a
+fresh `plan-verifier`. After two automatic `REVISE` verdicts for the same unit,
+stop resubmitting it and surface the blockers and options to the user; the cap
+is not `READY`, cosmetic splitting cannot reset it, and user-directed
+continuation remains allowed. Do not resubmit a substantially unchanged Plan.
+
+`READY` is readiness only, never user approval or write authorization.
 
 Before every agent call, identify the phase and apply a dispatch brake. Do not
 fan out when workers would repeatedly depend on evolving shared evidence, write
@@ -104,8 +122,10 @@ main session when they share one reasoning chain. Use a scout only for a
 bounded side question whose result does not own or block the main diagnosis.
 
 Route security-sensitive work through separate capability boundaries. Before
-required approval, use `security-reviewer` for evidence only. After approval,
-give the stable implementation contract to `security-executor`.
+the first readiness review for an affected unit, finish `security-reviewer` and
+carry its findings and dispositions into the Plan; do not run the two reviews
+concurrently. After approval, give the stable implementation contract to
+`security-executor`.
 
 Run a fresh outcome `verifier` at the smallest coherent integration boundary
 where the complete claim can be independently refuted. Verify earlier for
@@ -164,6 +184,11 @@ orchestrator can run and collect the result before resuming the agent.
 
 Never swap `plan-verifier` and `verifier`. The former challenges Plan
 readiness; the latter reproduces tests and challenges a completed-work claim.
-Neither role writes the Plan or fixes findings. Final judgment remains in the
-main session.
+Neither role writes the Plan or fixes findings. After a concrete `REFUTED`,
+materially fix the same claim before using a fresh verifier. After two
+consecutive `REFUTED` verdicts for that claim, stop automatic fix-and-reverify
+cycling and surface the failures and options to the user; the cap is not
+`CONFIRMED`, and user-directed continuation remains allowed. Do not reverify a
+substantially unchanged implementation. Final judgment remains in the main
+session.
 <!-- pilotfish-codex:end -->

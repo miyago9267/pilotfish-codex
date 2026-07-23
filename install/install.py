@@ -35,6 +35,14 @@ LEGACY_PATHS = frozenset({
     "features.multi_agent_v2.hide_spawn_agent_metadata", "agents.max_threads",
     "agents.max_concurrent_threads_per_session",
 })
+CANONICAL_ROLE_UPGRADE_DIGESTS = {
+    "plan-verifier": frozenset({
+        "c552938705065c826da9a3cbaf09c2fbbaa9fde4adb1f691a59b694d8468f541",
+    }),
+    "security-reviewer": frozenset({
+        "94d7de12d1cb197c98e83c2f78d402cf3fb393e860feee1e146f5b6294075d27",
+    }),
+}
 
 
 class InstallAbort(Exception):
@@ -450,9 +458,14 @@ def install(*, source_root: Path, codex_home: Path, dry_run: bool, check_codex: 
         source = source_root / "templates" / "agents" / f"{role}.toml"
         payload = source.read_bytes()
         target = agents / f"{role}.toml"
-        if target.exists() and target.read_bytes() != payload:
-            raise InstallAbort(f"installed_role_drift: agents/{role}.toml requires explicit replacement approval")
-        if not target.exists():
+        current = target.read_bytes() if target.exists() else None
+        if current is not None and current != payload:
+            known = CANONICAL_ROLE_UPGRADE_DIGESTS.get(role, frozenset())
+            if _sha256_bytes(current) not in known:
+                raise InstallAbort(f"installed_role_drift: agents/{role}.toml requires explicit replacement approval")
+            writes.append((target, payload, 0o600, current))
+            notes.append(f"upgraded canonical role {role}")
+        elif current is None:
             writes.append((target, payload, 0o600, None))
     if new_policy != policy_text:
         writes.append((policy_path, new_policy.encode(), 0o644, policy_text.encode() if policy_path.is_file() else None))
