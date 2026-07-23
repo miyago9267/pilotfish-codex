@@ -45,10 +45,10 @@ downstream slices do not block it. Shared blockers and unmet prerequisites
 still gate dependent work.
 
 For one readiness unit, materially revise after each valid `REVISE` and use a
-fresh verifier. After two automatic `REVISE` verdicts for the same unit, stop
-resubmitting it and surface the blockers and options to the user; the cap is not
-`READY`, cosmetic splitting cannot reset it, and user-directed continuation
-remains allowed. Do not resubmit a substantially unchanged Plan.
+fresh `plan-verifier`. After two automatic `REVISE` verdicts for the same unit,
+stop resubmitting it and surface the blockers and options to the user; the cap
+is not `READY`, cosmetic splitting cannot reset it, and user-directed
+continuation remains allowed. Do not resubmit a substantially unchanged Plan.
 
 `READY` is readiness only, never user approval or write authorization.
 

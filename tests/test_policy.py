@@ -88,6 +88,7 @@ class PolicyTests(unittest.TestCase):
             "Evidence:",
             "Minimum revision:",
             "Acceptance check:",
+            "use a fresh `plan-verifier`",
             "two automatic `REVISE` verdicts for the same unit",
             "surface the blockers and options to the user",
             "substantially unchanged Plan",
