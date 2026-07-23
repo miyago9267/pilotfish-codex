@@ -5,6 +5,26 @@ the policy block in `AGENTS.md` (`<!-- pilotfish-codex vX.Y.Z -->`).
 pilotfish-codex uses its own semantic versioning; upstream pilotfish versions
 are noted only as source references.
 
+## v1.3.1 — 2026-07-23
+
+- Define a strict Plan-readiness response contract: bare `READY` or structured
+  `REVISE` blockers with evidence, minimum revisions, and acceptance checks.
+- Review the stable-ID program envelope alone and require its `READY` before
+  child slice review. Track independently approvable slices and per-unit Plan
+  epochs; pause only one envelope or slice after its second automatic `REVISE`
+  while preserving user-directed continuation and unrelated slice progress.
+- Stop readiness review for explicit approval after the next executable slice
+  reaches `READY`; keep downstream slices in Plan unless the user requests a
+  batch or one approval and integration boundary requires them together. Fully
+  specify only that next slice; defer downstream implementation detail.
+- Treat decorated or malformed verifier output as a protocol failure rather
+  than a Plan judgment. Permit one fresh same-unit format-recovery retry per
+  epoch without consuming either valid automatic `REVISE` round.
+- Require completed read-only security evidence before the first Plan verifier
+  for each security-sensitive unit and forbid running those reviews
+  concurrently. Preserve the explicit approval/write boundary and keep
+  `CONFIRMED`/`REFUTED` outcome verification separate.
+
 ## v1.3.0 — 2026-07-20
 
 - Add redacted versioned dispatch receipts with atomic writes, path and hash

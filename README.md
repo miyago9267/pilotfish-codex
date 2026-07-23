@@ -21,13 +21,14 @@ attribution and maintains the Codex-specific adaptation: TOML role agents, an
 `AGENTS.md` orchestration policy, and an installer for `~/.codex/`. See the
 [Codex design mapping](./docs/design.md) for the adaptation boundary.
 
-v1.3.0 adds redacted dispatch receipts, explicit role-aware verification, a
-seven-role binding matrix, and a task-class selection/abstention evaluator.
-Terminal proof remains gated on a stable observed rollout schema. Native
-adapter-free routing, hard pre-execution blocking, and hidden effective-role
-metadata remain upstream-dependent. Remora 0.1.10 remains the reference only
-for the GPT-5.6 model and reasoning-effort bindings shared by the seven Codex
-roles.
+v1.3.1 adds a bounded Plan-readiness contract to the v1.3.0 dispatch-evidence
+work: independently gated program envelopes and approvable slices, strict
+`READY`/structured `REVISE` responses, per-unit Plan epochs, a two-round
+automatic resubmission brake, and security-review ordering. Terminal proof
+remains gated on a stable observed rollout schema. Native adapter-free routing,
+hard pre-execution blocking, and hidden effective-role metadata remain
+upstream-dependent. Remora 0.1.10 remains the reference only for the GPT-5.6
+model and reasoning-effort bindings shared by the seven Codex roles.
 
 > **Codex-specific boundary:** The Claude-only `Explore` override is
 > intentionally not installed. Pilotfish uses that exact name to shadow Claude
@@ -70,6 +71,19 @@ The main-session effort remains user-controlled.
   relevant paths, output shape, and verification expectation.
 - Treat delegated results as evidence to integrate, not conclusions to accept
   blindly. Non-trivial changes receive a fresh-context verifier pass.
+
+### Plan readiness contract
+
+Large Plans use one program envelope followed by independently approvable
+execution slices. After two automatic `REVISE` verdicts, only the affected
+readiness unit pauses; unrelated `READY` slices may continue through explicit
+approval. By default, the next executable slice is reviewed and presented for
+approval before downstream slices. Security-sensitive units complete read-only
+security review before the first readiness pass for that unit, and `READY`
+never authorizes writes.
+
+See [Plan epochs and readiness](./docs/design.md#plan-epochs-and-readiness) for
+the full contract.
 
 ## Install
 
