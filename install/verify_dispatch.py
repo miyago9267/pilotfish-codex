@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Prove that a named Codex child used its installed role model.
+"""Offline-safe verifier for the native Codex 0.145.0 dispatch contract.
 
-The live command is added below the evidence parser. Normal tests import only
-the offline functions and never call Codex or scan the user's session store.
+``--live --yes`` is deliberately the only path that invokes Codex.  All normal
+helpers validate staged inputs, receipts, and rollout evidence without reading a
+real Codex home or spending quota.
 """
 
 from __future__ import annotations
@@ -12,49 +13,62 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
 import tomllib
-import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 
-from validate_agents import validate_config
-
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from install import PINNED_CODEX_VERSION, parse_codex_version
+from validate_agents import ROLES, validate_agent
+from stage_smoke_home import StageError, explicit_layout_error, project_config_bytes
 
 TASK_NAME = "model_probe"
 TASK_NAME_RE = re.compile(r"^[a-z0-9_]+$")
-ROLE_NAMES = (
-    "scout",
-    "plan-verifier",
-    "executor",
-    "mech-executor",
-    "security-reviewer",
-    "security-executor",
-    "verifier",
-)
-ROUTE_OBSERVATIONS = frozenset(
-    {
-        "not_attempted",
-        "not_observed",
-        "requested_role_not_executed",
-        "typed_child_observed",
-        "typed_child_verified",
-    }
-)
-RECEIPT_VERSION = 1
-PARENT_EVIDENCE_TYPES = frozenset(
-    {"session_meta", "turn_context", "response_item", "event_msg"}
-)
-CHILD_EVIDENCE_TYPES = frozenset({"session_meta", "turn_context"})
-EXTRACTOR_EVIDENCE_TYPES = frozenset({"response_item", "event_msg"})
+ROLE_NAMES = tuple(sorted(ROLES))
+RECEIPT_KEYS = frozenset({
+    "status", "reason_code", "phase", "child_created", "codex_version",
+    "active_config_sha256", "active_role_manifest_sha256", "active_policy_sha256",
+    "target_config_sha256", "target_role_manifest_sha256", "target_policy_sha256",
+    "role", "task_name", "fork_turns", "parent_ref", "child_ref", "model",
+    "reasoning_effort", "sandbox",
+})
+MATRIX = {
+    ("preflight", "live_flag_required", "SKIPPED"), ("preflight", "operator_opt_in_required", "SKIPPED"),
+    ("preflight", "native_schema_introspection_unavailable", "SKIPPED"),
+    ("preflight", "version_parse_failed", "SKIPPED"), ("preflight", "version_not_pinned", "FAILED"),
+    ("preflight", "auth_unavailable", "SKIPPED"), ("preflight", "smoke_cwd_untrusted", "FAILED"),
+    ("preflight", "stage_layout_untrusted", "FAILED"), ("preflight", "external_input_unowned", "FAILED"),
+    ("preflight", "role_layer_unapproved", "FAILED"), ("preflight", "role_manifest_extra", "FAILED"),
+    ("preflight", "legacy_key_unowned", "FAILED"), ("preflight", "target_hash_mismatch", "FAILED"),
+    ("preflight", "snapshot_mutated", "FAILED"), ("preflight", "role_preflight_failed", "FAILED"),
+    ("preflight", "installed_role_drift", "FAILED"), ("preflight", "parent_model_not_distinct", "FAILED"),
+    ("preflight", "environment_propagation_failed", "FAILED"), ("preflight", "environment_binding_unobservable", "SKIPPED"),
+    ("preflight", "environment_binding_mismatch", "FAILED"),
+    ("execution-pre-child", "snapshot_mutated", "FAILED"), ("execution-pre-child", "parent_model_unavailable", "SKIPPED"),
+    ("execution-pre-child", "codex_exec_failed", "FAILED"),
+    ("post-spawn", "parent_model_unavailable_after_spawn", "SKIPPED"), ("post-spawn", "snapshot_mutated", "FAILED"),
+    ("post-spawn", "codex_exec_failed_after_spawn", "FAILED"), ("post-spawn", "native_v2_selection_unobservable", "SKIPPED"),
+    ("post-spawn", "native_v2_selection_mismatch", "FAILED"), ("post-spawn", "native_spawn_evidence_missing", "SKIPPED"),
+    ("post-spawn", "untyped_fallback_detected", "FAILED"), ("dispatch", "policy_violation", "FAILED"),
+    ("dispatch", "service_tier_override_forbidden", "FAILED"), ("post-spawn", "parent_child_mismatch", "FAILED"),
+    ("post-spawn", "child_evidence_missing", "SKIPPED"), ("post-spawn", "child_binding_unobservable", "SKIPPED"),
+    ("post-spawn", "child_binding_mismatch", "FAILED"), ("post-spawn", "child_model_mismatch", "FAILED"),
+    ("post-spawn", "child_effort_mismatch", "FAILED"), ("post-spawn", "inherited_parent_model", "FAILED"),
+    ("post-spawn", "native_verified", "NATIVE_OK"),
+}
 
 
 class EvidenceError(ValueError):
-    """Raised when rollout evidence is missing, malformed, or ambiguous."""
+    pass
+
+
+class ReceiptError(ValueError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -66,313 +80,439 @@ class RoleBinding:
 @dataclass(frozen=True)
 class Verdict:
     status: str
-    reason: str
-    parent_thread_id: str | None = None
-    child_thread_id: str | None = None
-    parent_model: str | None = None
-    child_model: str | None = None
-    route_observation: str = "not_observed"
+    reason_code: str
+    phase: str = "post-spawn"
+    child_created: str = "unknown"
+    role: str | None = None
+    task_name: str | None = None
+    fork_turns: str | None = None
+    parent_ref: str | None = None
+    child_ref: str | None = None
+    model: str | None = None
+    reasoning_effort: str | None = None
 
 
-@dataclass(frozen=True)
-class ReceiptDestination:
-    directory: Path
-    receipt_path: Path
+def _verdict(status: str, reason_code: str, *, phase: str = "post-spawn", child_created: str = "unknown", **values: str | None) -> Verdict:
+    return Verdict(status, reason_code, phase, child_created, **values)
 
 
-@dataclass(frozen=True)
-class LiveEvidence:
-    parent_rollout: Path | None = None
-    child_rollout: Path | None = None
-    started_at_utc: str | None = None
-    ended_at_utc: str | None = None
+def _short_ref(value: str | None) -> str | None:
+    return hashlib.sha256(value.encode()).hexdigest()[:16] if isinstance(value, str) and value else None
 
 
-def _verdict(
-    status: str,
-    reason: str,
-    *,
-    parent_thread_id: str | None = None,
-    child_thread_id: str | None = None,
-    parent_model: str | None = None,
-    child_model: str | None = None,
-    route_observation: str = "not_observed",
-) -> Verdict:
-    if route_observation not in ROUTE_OBSERVATIONS:
-        raise ValueError(f"unsupported route observation: {route_observation}")
-    if status in {"ADAPTER_OK", "NATIVE_OK"}:
-        route_observation = "typed_child_verified"
-    elif child_thread_id is not None and route_observation == "not_observed":
-        route_observation = "typed_child_observed"
-    return Verdict(
-        status=status,
-        reason=reason,
-        parent_thread_id=parent_thread_id,
-        child_thread_id=child_thread_id,
-        parent_model=parent_model,
-        child_model=child_model,
-        route_observation=route_observation,
+def _stat_fingerprint(value: os.stat_result) -> tuple[int, ...]:
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_mode,
+        value.st_nlink,
+        value.st_uid,
+        value.st_gid,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
     )
 
 
-def _with_route_observation(verdict: Verdict, route_observation: str) -> Verdict:
-    return _verdict(
-        verdict.status,
-        verdict.reason,
-        parent_thread_id=verdict.parent_thread_id,
-        child_thread_id=verdict.child_thread_id,
-        parent_model=verdict.parent_model,
-        child_model=verdict.child_model,
-        route_observation=route_observation,
+def _read_stable_file_snapshot(
+    path: Path,
+    home: Path,
+) -> tuple[bytes, tuple[int, ...]]:
+    try:
+        root = home.resolve(strict=True)
+        before = path.lstat()
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        raise ReceiptError("mandatory hash input unavailable") from exc
+    if (
+        stat.S_ISLNK(before.st_mode)
+        or not stat.S_ISREG(before.st_mode)
+        or not resolved.is_relative_to(root)
+    ):
+        raise ReceiptError("mandatory input escapes its home")
+    fd: int | None = None
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        opened = os.fstat(fd)
+        if _stat_fingerprint(opened) != _stat_fingerprint(before):
+            raise ReceiptError("mandatory hash input mutated")
+        with os.fdopen(fd, "rb", closefd=False) as handle:
+            content = handle.read()
+        after_fd = os.fstat(fd)
+        after_path = path.lstat()
+        if (
+            _stat_fingerprint(after_fd) != _stat_fingerprint(before)
+            or _stat_fingerprint(after_path) != _stat_fingerprint(before)
+        ):
+            raise ReceiptError("mandatory hash input mutated")
+        return content, _stat_fingerprint(before)
+    except OSError as exc:
+        raise ReceiptError("mandatory hash input unavailable") from exc
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+def _revalidate_hash_sources(
+    snapshots: list[tuple[Path, tuple[int, ...]]],
+) -> None:
+    for source, expected in snapshots:
+        try:
+            current = source.lstat()
+        except OSError as exc:
+            raise ReceiptError("mandatory hash input mutated") from exc
+        if _stat_fingerprint(current) != expected:
+            raise ReceiptError("mandatory hash input mutated")
+
+
+def _optional_fingerprint(path: Path) -> tuple[int, ...] | None:
+    try:
+        return _stat_fingerprint(path.lstat())
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ReceiptError("mandatory hash input unavailable") from exc
+
+
+def _role_manifest(home: Path) -> tuple[str, list[tuple[Path, bytes]]]:
+    try:
+        root = home.resolve(strict=True)
+        agents = home / "agents"
+        agents_before = agents.lstat()
+        agents_resolved = agents.resolve(strict=True)
+    except OSError as exc:
+        raise ReceiptError("mandatory hash input unavailable") from exc
+    if (
+        stat.S_ISLNK(agents_before.st_mode)
+        or not stat.S_ISDIR(agents_before.st_mode)
+        or not agents_resolved.is_relative_to(root)
+    ):
+        raise ReceiptError("mandatory input escapes its home")
+    try:
+        paths = sorted(agents.rglob("*.toml"))
+    except OSError as exc:
+        raise ReceiptError("mandatory hash input unavailable") from exc
+    if not paths:
+        raise ReceiptError("mandatory hash input unavailable")
+    directories = {agents}
+    for path in paths:
+        parent = path.parent
+        while True:
+            directories.add(parent)
+            if parent == agents:
+                break
+            parent = parent.parent
+    directory_snapshots: list[tuple[Path, tuple[int, ...]]] = []
+    for directory in sorted(directories):
+        try:
+            directory_stat = (
+                agents_before if directory == agents else directory.lstat()
+            )
+            directory_resolved = directory.resolve(strict=True)
+        except OSError as exc:
+            raise ReceiptError("mandatory hash input unavailable") from exc
+        if (
+            stat.S_ISLNK(directory_stat.st_mode)
+            or not stat.S_ISDIR(directory_stat.st_mode)
+            or not directory_resolved.is_relative_to(agents_resolved)
+        ):
+            raise ReceiptError("mandatory input escapes its home")
+        directory_snapshots.append(
+            (directory, _stat_fingerprint(directory_stat))
+        )
+    entries: list[tuple[Path, bytes]] = []
+    file_snapshots: list[tuple[Path, tuple[int, ...]]] = []
+    for path in paths:
+        content, fingerprint = _read_stable_file_snapshot(path, home)
+        entries.append(
+            (
+                path.relative_to(agents),
+                content,
+            )
+        )
+        file_snapshots.append((path, fingerprint))
+    _revalidate_hash_sources(file_snapshots + directory_snapshots)
+    try:
+        paths_after = sorted(agents.rglob("*.toml"))
+    except OSError as exc:
+        raise ReceiptError("mandatory hash input mutated") from exc
+    if paths_after != paths:
+        raise ReceiptError("mandatory hash input mutated")
+    digest = hashlib.sha256()
+    for relative, content in entries:
+        encoded = relative.as_posix().encode("utf-8")
+        digest.update(len(encoded).to_bytes(8, "big")); digest.update(encoded)
+        digest.update(len(content).to_bytes(8, "big")); digest.update(content)
+    return digest.hexdigest(), entries
+
+
+def role_manifest_hash(home: Path) -> str:
+    return _role_manifest(home)[0]
+
+
+def effective_policy(home: Path) -> Path:
+    candidates: list[Path] = []
+    for name in ("AGENTS.override.md", "AGENTS.md"):
+        candidate = home / name
+        try:
+            candidate_stat = candidate.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise ReceiptError("effective global policy is unavailable") from exc
+        if stat.S_ISLNK(candidate_stat.st_mode) or not stat.S_ISREG(candidate_stat.st_mode):
+            raise ReceiptError("effective global policy is unsafe")
+        candidates.append(candidate)
+    if len(candidates) != 1:
+        raise ReceiptError("exactly one effective global policy file is required")
+    return candidates[0]
+
+
+def _validate_role_entries(
+    entries: list[tuple[Path, bytes]],
+) -> tuple[list[str], list[dict]]:
+    problems: list[str] = []
+    parsed: list[dict] = []
+    seen: set[str] = set()
+    for relative, content in entries:
+        data = tomllib.loads(content.decode("utf-8"))
+        parsed.append(data)
+        name = data.get("name")
+        if name != relative.stem:
+            problems.append(
+                f"{relative.name}: name '{name}' does not match filename"
+            )
+        if isinstance(name, str):
+            if name in seen:
+                problems.append(
+                    f"{relative.name}: duplicate role name '{name}'"
+                )
+            else:
+                seen.add(name)
+        problems.extend(
+            f"{relative.name}: {message}"
+            for message in validate_agent(data)
+        )
+    missing = ROLES - seen
+    extra = seen - ROLES
+    if missing:
+        problems.append(f"role manifest missing: {', '.join(sorted(missing))}")
+    if extra:
+        problems.append(f"role manifest extra: {', '.join(sorted(extra))}")
+    return problems, parsed
+
+
+def _inside(path: Path, root: Path) -> bool:
+    try:
+        path.resolve(strict=True).relative_to(root.resolve(strict=True))
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def validate_home_pair(active: Path, staged: Path) -> tuple[Path, Path]:
+    if not active.is_absolute() or not staged.is_absolute():
+        raise ReceiptError("homes must be absolute")
+    try:
+        left, right = active.resolve(strict=True), staged.resolve(strict=True)
+    except OSError as exc:
+        raise ReceiptError("homes must exist and be readable") from exc
+    if not left.is_dir() or not right.is_dir() or not os.access(left, os.R_OK | os.X_OK) or not os.access(right, os.R_OK | os.X_OK):
+        raise ReceiptError("homes must be readable directories")
+    try:
+        left.relative_to(right)
+    except ValueError:
+        pass
+    else:
+        raise ReceiptError("homes must be distinct and non-nested")
+    try:
+        right.relative_to(left)
+    except ValueError:
+        pass
+    else:
+        raise ReceiptError("homes must be distinct and non-nested")
+    return left, right
+
+
+def _path_value(value: object) -> bool:
+    return isinstance(value, str) and bool(re.match(r"(?:/|~/|\./|\.\./|\$\{(?:HOME|CODEX_HOME)\}|[A-Za-z]:\\\\|\\\\\\\\|[A-Za-z][A-Za-z0-9+.-]*://)", value))
+
+
+def _external_inputs(value: object, keys: tuple[str, ...] = ()) -> bool:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            segment = str(key).lower()
+            path_key = segment in {"path", "file", "dir", "directory", "command", "executable", "cwd"} or segment.endswith("_path")
+            if path_key and ((segment in {"command", "executable"} and bool(child)) or _path_value(child)):
+                return True
+            if _external_inputs(child, keys + (segment,)):
+                return True
+    elif isinstance(value, list):
+        return any(_external_inputs(item, keys) for item in value)
+    return _path_value(value) and any(key in {"path", "file", "dir", "directory", "command", "executable", "cwd"} or key.endswith("_path") for key in keys)
+
+
+def validate_stage_layout(home: Path, *, active_home: bool = False) -> str | None:
+    """Validate staged layout or the explicit active-home input projection."""
+    try:
+        root = home.resolve(strict=True)
+        if explicit_layout_error(
+            root,
+            allow_rollback_backups=active_home,
+            project_active_root=active_home,
+        ):
+            return "stage_layout_untrusted"
+        policy_candidates = [
+            home / "AGENTS.override.md",
+            home / "AGENTS.md",
+        ]
+        policy_projection = [
+            (candidate, _optional_fingerprint(candidate))
+            for candidate in policy_candidates
+        ]
+        policy = effective_policy(home)
+        config_path = home / "config.toml"
+        config_content, config_fingerprint = _read_stable_file_snapshot(
+            config_path,
+            root,
+        )
+        _, policy_fingerprint = _read_stable_file_snapshot(policy, root)
+        config = tomllib.loads(config_content.decode("utf-8"))
+        features = config.get("features", {})
+        agents_config = config.get("agents", {})
+        v2 = features.get("multi_agent_v2", {}) if isinstance(features, dict) else {}
+        if (isinstance(features, dict) and features.get("multi_agent") is not None) or (isinstance(v2, dict) and any(key in v2 for key in ("tool_namespace", "hide_spawn_agent_metadata"))) or (isinstance(agents_config, dict) and any(key in agents_config for key in ("max_threads", "max_concurrent_threads_per_session"))):
+            return "legacy_key_unowned"
+        if isinstance(agents_config, dict) and set(agents_config) - {"max_depth"}:
+            return "role_layer_unapproved"
+        if active_home:
+            project_config_bytes(config_content)
+        else:
+            for forbidden in ("notify", "mcp_servers", "plugins", "skills", "marketplace", "marketplaces", "model_providers", "projects", "project_root_markers", "experimental_compact_prompt_file", "log_dir", "sqlite_home"):
+                if forbidden in config and _external_inputs({forbidden: config[forbidden]}):
+                    return "external_input_unowned"
+            if _external_inputs(config):
+                return "external_input_unowned"
+            project_config_bytes(config_content)
+        _, manifest_entries = _role_manifest(root)
+        problems, role_configs = _validate_role_entries(manifest_entries)
+        if any(_external_inputs(role_config) for role_config in role_configs):
+            return "external_input_unowned"
+        if any("extra" in problem for problem in problems):
+            return "role_manifest_extra"
+        if problems:
+            return "role_preflight_failed"
+        _revalidate_hash_sources(
+            [
+                (config_path, config_fingerprint),
+                (policy, policy_fingerprint),
+            ]
+        )
+        if any(
+            _optional_fingerprint(candidate) != expected
+            for candidate, expected in policy_projection
+        ):
+            return "stage_layout_untrusted"
+    except (
+        OSError,
+        UnicodeDecodeError,
+        tomllib.TOMLDecodeError,
+        ReceiptError,
+        StageError,
+    ):
+        return "stage_layout_untrusted"
+    return None
+
+
+def hash_inputs(home: Path) -> dict[str, str]:
+    config = home / "config.toml"
+    policy_candidates = [
+        home / "AGENTS.override.md",
+        home / "AGENTS.md",
+    ]
+    policy_projection = [
+        (candidate, _optional_fingerprint(candidate))
+        for candidate in policy_candidates
+    ]
+    policy = effective_policy(home)
+    config_content, config_fingerprint = _read_stable_file_snapshot(config, home)
+    policy_content, policy_fingerprint = _read_stable_file_snapshot(policy, home)
+    try:
+        config_projection = project_config_bytes(config_content)
+    except StageError as exc:
+        raise ReceiptError("mandatory hash input unavailable") from exc
+    manifest_hash, manifest_entries = _role_manifest(home)
+    _revalidate_hash_sources(
+        [
+            (config, config_fingerprint),
+            (policy, policy_fingerprint),
+        ]
     )
+    if any(
+        _optional_fingerprint(candidate) != expected
+        for candidate, expected in policy_projection
+    ):
+        raise ReceiptError("mandatory hash input mutated")
+    names: list[object] = []
+    try:
+        for relative, content in manifest_entries:
+            name = tomllib.loads(content.decode("utf-8")).get("name")
+            if name != relative.stem:
+                raise ReceiptError("mandatory hash input unavailable")
+            names.append(name)
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise ReceiptError("mandatory hash input unavailable") from exc
+    if len(names) != len(ROLES) or set(names) != ROLES:
+        raise ReceiptError("mandatory hash input unavailable")
+    return {
+        "config": hashlib.sha256(config_projection).hexdigest(),
+        "role_manifest": manifest_hash,
+        "policy": hashlib.sha256(policy_content).hexdigest(),
+    }
+
+
+def snapshot_inputs(home: Path) -> dict[str, str]:
+    return hash_inputs(home)
+
+
+def snapshot_changed(home: Path, snapshot: dict[str, str]) -> bool:
+    return hash_inputs(home) != snapshot
+
+
+def read_role_binding(path: Path) -> RoleBinding:
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise EvidenceError(f"invalid role TOML: {path}") from exc
+    model, effort = data.get("model"), data.get("model_reasoning_effort")
+    if not isinstance(model, str) or not model or not isinstance(effort, str) or not effort:
+        raise EvidenceError(f"role binding is incomplete: {path}")
+    return RoleBinding(model, effort)
 
 
 def task_name_for_role(role: str) -> str:
-    """Return the stable, schema-safe probe task name for one configured role."""
-    if role not in ROLE_NAMES:
+    if role not in ROLES:
         raise ValueError(f"unsupported role: {role}")
     return f"{TASK_NAME}_{role.replace('-', '_')}"
 
 
-def _payloads(events: Iterable[dict], item_type: str) -> list[dict]:
-    return [
-        event["payload"]
-        for event in events
-        if event.get("type") == item_type and isinstance(event.get("payload"), dict)
-    ]
-
-
-def _validate_evidence_events(
-    events: Iterable[dict], relevant_types: frozenset[str]
-) -> None:
-    """Reject malformed evidence while ignoring unrelated event payloads."""
-    for event in events:
-        if not isinstance(event, dict):
-            raise EvidenceError("rollout event is not an object")
-        event_type = event.get("type")
-        if event_type not in relevant_types:
-            continue
-        if not isinstance(event.get("payload"), dict):
-            raise EvidenceError(f"{event_type} payload is not an object")
-
-
-def load_jsonl(path: Path) -> list[dict]:
-    """Load a rollout JSONL file and reject malformed or non-object events."""
-    events: list[dict] = []
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError as exc:
-        raise EvidenceError(f"cannot read rollout {path}: {exc}") from exc
-
-    for line_number, line in enumerate(lines, start=1):
-        if not line.strip():
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise EvidenceError(f"{path}:{line_number}: invalid JSON") from exc
-        if not isinstance(event, dict):
-            raise EvidenceError(f"{path}:{line_number}: event is not an object")
-        try:
-            _validate_evidence_events([event], PARENT_EVIDENCE_TYPES)
-        except EvidenceError as exc:
-            raise EvidenceError(f"{path}:{line_number}: {exc}") from exc
-        events.append(event)
-
-    if not events:
-        raise EvidenceError(f"{path}: rollout is empty")
-    return events
-
-
-def parse_exec_thread_id(output: str) -> str:
-    """Extract one exact parent thread ID from `codex exec --json` output."""
-    thread_ids: set[str] = set()
-    for line_number, line in enumerate(output.splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise EvidenceError(f"exec output line {line_number} is not JSON") from exc
-        if not isinstance(event, dict):
-            raise EvidenceError(f"exec output line {line_number} is not an object")
-        if event.get("type") != "thread.started":
-            continue
-        thread_id = event.get("thread_id")
-        if thread_id is None and isinstance(event.get("thread"), dict):
-            thread_id = event["thread"].get("id")
-        if isinstance(thread_id, str) and thread_id:
-            thread_ids.add(thread_id)
-
-    if len(thread_ids) != 1:
-        raise EvidenceError(
-            f"expected one exec parent thread ID, found {len(thread_ids)}"
-        )
-    return thread_ids.pop()
-
-
-def locate_rollout(
-    sessions_root: Path,
-    thread_id: str,
-    candidate_directories: Iterable[Path],
-) -> Path:
-    """Find one rollout by exact thread-ID suffix in bounded day directories.
-
-    The suffix comparison is literal on purpose: a thread ID is evidence
-    parsed from exec output, so glob metacharacters in it must never change
-    which file matches."""
-    trust_root = sessions_root.resolve()
-    suffix = f"-{thread_id}.jsonl"
-    matches: set[Path] = set()
-    for directory in candidate_directories:
-        resolved_directory = directory.resolve()
-        if not resolved_directory.is_relative_to(trust_root):
-            raise EvidenceError(
-                f"candidate rollout directory is outside {trust_root}: "
-                f"{resolved_directory}"
-            )
-        if resolved_directory.is_dir():
-            for path in resolved_directory.iterdir():
-                if not path.name.endswith(suffix) or not path.is_file():
-                    continue
-                resolved_path = path.resolve()
-                if not resolved_path.is_relative_to(trust_root):
-                    raise EvidenceError(
-                        f"rollout resolves outside {trust_root}: {resolved_path}"
-                    )
-                matches.add(resolved_path)
-
-    if len(matches) != 1:
-        raise EvidenceError(
-            f"expected one rollout for thread {thread_id}, found {len(matches)}"
-        )
-    return matches.pop()
-
-
-def candidate_day_directories(
-    sessions_root: Path,
-    started_at: datetime,
-    ended_at: datetime,
-) -> list[Path]:
-    """Return unique day directories explicitly crossed by one live probe."""
-    first_date, last_date = sorted((started_at.date(), ended_at.date()))
-    dates = (
-        first_date + timedelta(days=offset)
-        for offset in range((last_date - first_date).days + 1)
-    )
-    return [
-        sessions_root / f"{date.year:04d}" / f"{date.month:02d}" / f"{date.day:02d}"
-        for date in dates
-    ]
-
-
-def read_role_config(path: Path) -> dict:
-    """Read one complete role TOML for install-drift comparison."""
-    try:
-        with path.open("rb") as handle:
-            data = tomllib.load(handle)
-    except FileNotFoundError as exc:
-        raise EvidenceError(f"role file not found: {path}") from exc
-    except tomllib.TOMLDecodeError as exc:
-        raise EvidenceError(f"invalid role TOML: {path}") from exc
-    return data
-
-
-def read_role_binding(path: Path) -> RoleBinding:
-    """Read the model and effort that a named role must resolve to."""
-    data = read_role_config(path)
-
-    model = data.get("model")
-    effort = data.get("model_reasoning_effort")
-    if not isinstance(model, str) or not model:
-        raise EvidenceError(f"role model is missing: {path}")
-    if not isinstance(effort, str) or not effort:
-        raise EvidenceError(f"role effort is missing: {path}")
-    return RoleBinding(model=model, effort=effort)
-
-
-def _spawn_call(parent_events: list[dict]) -> dict:
-    spawn_calls = [
-        payload
-        for payload in _payloads(parent_events, "response_item")
-        if payload.get("type") == "function_call"
-        and payload.get("name") == "spawn_agent"
-    ]
-    if len(spawn_calls) != 1:
-        reason = "missing" if not spawn_calls else "ambiguous"
-        raise EvidenceError(f"spawn call is {reason}")
-    return spawn_calls[0]
-
-
-def extract_child_thread_id(
-    parent_events: list[dict], *, expected_task_name: str | None = None
-) -> str:
-    """Resolve one child from the exact spawn call/activity correlation."""
-    _validate_evidence_events(parent_events, EXTRACTOR_EVIDENCE_TYPES)
-    spawn = _spawn_call(parent_events)
-    call_id = spawn.get("call_id")
-    if not isinstance(call_id, str) or not call_id:
-        raise EvidenceError("spawn call has no call ID")
-    try:
-        arguments = json.loads(spawn.get("arguments", ""))
-    except (json.JSONDecodeError, TypeError) as exc:
-        raise EvidenceError("spawn arguments are invalid") from exc
-    if not isinstance(arguments, dict):
-        raise EvidenceError("spawn arguments are not an object")
-    task_name = arguments.get("task_name")
-    if expected_task_name is not None and task_name != expected_task_name:
-        raise EvidenceError("spawn task name does not match requested role")
-
-    activities = [
-        payload
-        for payload in _payloads(parent_events, "event_msg")
-        if payload.get("type") == "sub_agent_activity"
-        and isinstance(payload.get("event_id"), str)
-        and bool(payload.get("event_id"))
-        and payload["event_id"] == call_id
-        and payload.get("kind") == "started"
-        and payload.get("agent_path") == f"/root/{task_name}"
-    ]
-    if len(activities) != 1:
-        raise EvidenceError(
-            f"expected one correlated child activity, found {len(activities)}"
-        )
-    child_id = activities[0].get("agent_thread_id")
-    if not isinstance(child_id, str) or not child_id:
-        raise EvidenceError("correlated child activity has no thread ID")
-    return child_id
-
-
-def build_codex_command(
-    *,
-    codex_bin: str,
-    cwd: Path,
-    mode: str,
-    parent_model: str,
-    role: str = "scout",
-    task_name: str = TASK_NAME,
-) -> list[str]:
-    """Build the isolated one-parent/one-child live probe command."""
-    if mode not in {"adapter", "native"}:
-        raise ValueError(f"unsupported verification mode: {mode}")
-    if role not in ROLE_NAMES:
-        raise ValueError(f"unsupported role: {role}")
-    if not TASK_NAME_RE.fullmatch(task_name):
-        raise ValueError(f"invalid task name: {task_name}")
-
-    namespace = "agents" if mode == "adapter" else "collaboration"
+def build_codex_command(*, codex_bin: str, cwd: Path, parent_model: str, role: str = "scout", task_name: str | None = None) -> list[str]:
+    task = task_name or task_name_for_role(role)
+    if role not in ROLES or not TASK_NAME_RE.fullmatch(task):
+        raise ValueError("invalid role or task name")
     prompt = (
-        f"Call {namespace}.spawn_agent exactly once with: "
-        f"task_name='{task_name}', agent_type='{role}', fork_turns='none', "
-        "message='Do not run commands. Reply only with READY.'. Then use only "
-        "agent lifecycle tools to wait for the child to finish and close it; "
-        "relay its answer without calling non-lifecycle tools."
+        "Call spawn_agent exactly once with message='Do not run commands. Reply only READY.', "
+        f"agent_type='{role}', task_name='{task}', fork_turns='none'. "
+        "Then call wait_agent exactly once with timeout_ms=30000 so the child "
+        "can complete. Do not use an untyped fallback, a second spawn, or any "
+        "child override."
     )
-    command = [
+    return [
         codex_bin,
         "exec",
         "--json",
         "--strict-config",
+        "--skip-git-repo-check",
         "-C",
         str(cwd),
         "-m",
@@ -381,1024 +521,432 @@ def build_codex_command(
         'model_reasoning_effort="low"',
         "-s",
         "read-only",
+        prompt,
     ]
-    if mode == "native":
-        command.append("--ignore-user-config")
-    command.append(prompt)
-    return command
 
 
-def _session_id(events: list[dict]) -> tuple[str | None, str | None]:
-    payloads = _payloads(events, "session_meta")
-    if len(payloads) != 1:
-        return None, None
-    session_id = payloads[0].get("id")
-    parent_id = payloads[0].get("parent_thread_id")
-    return (
-        session_id if isinstance(session_id, str) else None,
-        parent_id if isinstance(parent_id, str) else None,
-    )
+def _payloads(events: Iterable[dict], kind: str) -> list[dict]:
+    return [event["payload"] for event in events if isinstance(event, dict) and event.get("type") == kind and isinstance(event.get("payload"), dict)]
 
 
-def _turn_context(
-    events: list[dict], *, required_fields: tuple[str, ...]
-) -> dict | None:
-    payloads: list[dict] = []
-    for event in events:
-        if event.get("type") != "turn_context":
-            continue
-        payload = event.get("payload")
-        if not isinstance(payload, dict):
-            raise EvidenceError("turn context payload is not an object")
-        payloads.append(payload)
-    if not payloads:
-        return None
-
-    evidence: list[tuple[str, ...]] = []
-    for payload in payloads:
-        values = tuple(payload.get(field) for field in required_fields)
-        if any(not isinstance(value, str) or not value for value in values):
-            raise EvidenceError("turn context has invalid required fields")
-        evidence.append(values)
-    if any(values != evidence[0] for values in evidence[1:]):
-        raise EvidenceError("turn context evidence conflicts")
-    return payloads[0]
+def _events_valid(events: Iterable[object], kinds: set[str]) -> bool:
+    return all(isinstance(event, dict) and (event.get("type") not in kinds or isinstance(event.get("payload"), dict)) for event in events)
 
 
-def inspect_dispatch(
-    parent_events: list[dict],
-    child_events: list[dict],
-    *,
-    expected_role: RoleBinding,
-    expected_namespace: str,
-    expected_role_name: str = "scout",
-    expected_task_name: str = TASK_NAME,
-    adapter_free: bool = False,
-) -> Verdict:
-    """Return a fail-closed verdict from one exact parent/child rollout pair."""
-    if expected_role_name not in ROLE_NAMES:
-        raise ValueError(f"unsupported role: {expected_role_name}")
-    if not TASK_NAME_RE.fullmatch(expected_task_name):
-        raise ValueError(f"invalid task name: {expected_task_name}")
-    try:
-        _validate_evidence_events(parent_events, PARENT_EVIDENCE_TYPES)
-    except EvidenceError as exc:
-        reason = (
-            "parent_context_invalid"
-            if str(exc).startswith("turn_context ")
-            else "parent_evidence_invalid"
-        )
-        return _verdict("FAILED", reason)
-
-    parent_id, _ = _session_id(parent_events)
-    try:
-        parent_context = _turn_context(
-            parent_events,
-            required_fields=("model", "effort", "multi_agent_version"),
-        )
-    except EvidenceError as exc:
-        reason = (
-            "parent_context_conflict"
-            if "conflicts" in str(exc)
-            else "parent_context_invalid"
-        )
-        return _verdict("FAILED", reason, parent_thread_id=parent_id)
-    if parent_id is None or parent_context is None:
-        return _verdict("FAILED", "parent_evidence_missing")
-
-    parent_model = parent_context.get("model")
-    multi_agent_version = parent_context.get("multi_agent_version")
-    if multi_agent_version == "v1":
-        return _verdict(
-            "SKIPPED",
-            "adapter_not_exercised",
-            parent_thread_id=parent_id,
-            parent_model=parent_model,
-        )
-    if multi_agent_version != "v2":
-        return _verdict(
-            "FAILED",
-            "multi_agent_version_mismatch",
-            parent_thread_id=parent_id,
-            parent_model=parent_model,
-        )
-
-    try:
-        spawn = _spawn_call(parent_events)
-    except EvidenceError as exc:
-        if "missing" in str(exc):
-            return _verdict(
-                "FAILED",
-                "requested_role_not_executed",
-                parent_thread_id=parent_id,
-                parent_model=parent_model,
-                route_observation="requested_role_not_executed",
-            )
-        return _verdict(
-            "FAILED",
-            "spawn_call_ambiguous",
-            parent_thread_id=parent_id,
-            parent_model=parent_model,
-        )
-    if spawn.get("namespace") != expected_namespace:
-        return _verdict(
-            "FAILED",
-            "namespace_mismatch",
-            parent_thread_id=parent_id,
-            parent_model=parent_model,
-        )
-
-    try:
-        arguments = json.loads(spawn.get("arguments", ""))
-    except (json.JSONDecodeError, TypeError):
-        return _verdict(
-            "FAILED",
-            "spawn_arguments_invalid",
-            parent_thread_id=parent_id,
-            parent_model=parent_model,
-        )
-    if not isinstance(arguments, dict):
-        return _verdict(
-            "FAILED",
-            "spawn_arguments_invalid",
-            parent_thread_id=parent_id,
-            parent_model=parent_model,
-        )
-    if "service_tier" in arguments:
-        return _verdict(
-            "FAILED",
-            "service_tier_override_forbidden",
-            parent_thread_id=parent_id,
-            parent_model=parent_model,
-        )
-    if arguments.get("agent_type") != expected_role_name:
-        return _verdict(
-            "FAILED",
-            "agent_type_mismatch",
-            parent_thread_id=parent_id,
-            parent_model=parent_model,
-        )
-    if arguments.get("fork_turns") != "none":
-        return _verdict(
-            "FAILED",
-            "fork_turns_mismatch",
-            parent_thread_id=parent_id,
-            parent_model=parent_model,
-        )
-
-    task_name = arguments.get("task_name")
-    if task_name != expected_task_name or not TASK_NAME_RE.fullmatch(str(task_name)):
-        return _verdict(
-            "FAILED",
-            "task_name_mismatch",
-            parent_thread_id=parent_id,
-            parent_model=parent_model,
-        )
-
-    call_id = spawn.get("call_id")
-    if not isinstance(call_id, str) or not call_id:
-        return _verdict(
-            "FAILED",
-            "spawn_call_id_missing",
-            parent_thread_id=parent_id,
-            parent_model=parent_model,
-        )
-    activities = [
-        payload
-        for payload in _payloads(parent_events, "event_msg")
-        if payload.get("type") == "sub_agent_activity"
-        and isinstance(payload.get("event_id"), str)
-        and bool(payload.get("event_id"))
-        and payload["event_id"] == call_id
-        and payload.get("kind") == "started"
-        and payload.get("agent_path") == f"/root/{task_name}"
+def inspect_dispatch(parent_events: list[dict], child_events: list[dict], *, expected_role: RoleBinding, expected_role_name: str = "scout", expected_task_name: str | None = None) -> Verdict:
+    """Classify native evidence without using an adapter namespace predicate."""
+    task = expected_task_name or task_name_for_role(expected_role_name)
+    if not _events_valid(parent_events, {"session_meta", "turn_context", "response_item", "event_msg"}):
+        return _verdict("FAILED", "policy_violation", phase="dispatch")
+    parent_contexts = _payloads(parent_events, "turn_context")
+    raw_versions = [ctx.get("multi_agent_version") for ctx in parent_contexts if "multi_agent_version" in ctx]
+    if any(not isinstance(version, str) for version in raw_versions):
+        return _verdict("FAILED", "native_v2_selection_mismatch", child_created="unknown")
+    versions = set(raw_versions)
+    function_calls = [
+        (index, event["payload"])
+        for index, event in enumerate(parent_events)
+        if isinstance(event, dict)
+        and event.get("type") == "response_item"
+        and isinstance(event.get("payload"), dict)
+        and event["payload"].get("type") == "function_call"
     ]
-    if len(activities) != 1:
-        return _verdict(
-            "FAILED",
-            "child_activity_missing" if not activities else "child_activity_ambiguous",
-            parent_thread_id=parent_id,
-            parent_model=parent_model,
-        )
-
-    child_id = activities[0].get("agent_thread_id")
-    if not isinstance(child_id, str) or not child_id:
-        return _verdict(
-            "FAILED",
-            "child_thread_id_missing",
-            parent_thread_id=parent_id,
-            parent_model=parent_model,
-        )
-
+    calls = [
+        (index, payload)
+        for index, payload in function_calls
+        if payload.get("name") == "spawn_agent"
+    ]
+    waits = [
+        (index, payload)
+        for index, payload in function_calls
+        if payload.get("name") == "wait_agent"
+    ]
+    untyped = [p for p in _payloads(parent_events, "response_item") if p.get("type") == "function_call" and p.get("name") != "spawn_agent" and "spawn" in str(p.get("name", ""))]
+    activities = [p for p in _payloads(parent_events, "event_msg") if p.get("type") == "sub_agent_activity" and p.get("kind") == "started"]
+    created = "yes" if activities else "unknown"
+    if untyped:
+        return _verdict("FAILED", "untyped_fallback_detected", child_created=created)
+    if len(calls) > 1:
+        return _verdict("FAILED", "policy_violation", phase="dispatch", child_created=created)
+    if not calls:
+        return _verdict("SKIPPED", "native_spawn_evidence_missing", child_created=created)
+    call_index, call = calls[0]
     try:
-        _validate_evidence_events(child_events, CHILD_EVIDENCE_TYPES)
-    except EvidenceError as exc:
-        reason = (
-            "child_context_invalid"
-            if str(exc).startswith("turn_context ")
-            else "child_evidence_invalid"
-        )
-        return _verdict(
-            "FAILED",
-            reason,
-            parent_thread_id=parent_id,
-            child_thread_id=child_id,
-            parent_model=parent_model,
-        )
-
-    child_session_id, child_parent_id = _session_id(child_events)
+        args = json.loads(call.get("arguments", ""))
+    except (TypeError, json.JSONDecodeError):
+        return _verdict("FAILED", "policy_violation", phase="dispatch", child_created=created)
+    if not isinstance(args, dict):
+        return _verdict("FAILED", "policy_violation", phase="dispatch", child_created=created)
+    if "service_tier" in args:
+        return _verdict("FAILED", "service_tier_override_forbidden", phase="dispatch", child_created=created)
+    allowed = {"message", "agent_type", "task_name", "fork_turns"}
+    if set(args) != allowed or not isinstance(args.get("message"), str) or not args["message"].strip() or args.get("agent_type") != expected_role_name or args.get("task_name") != task or not TASK_NAME_RE.fullmatch(str(args.get("task_name"))) or args.get("fork_turns") not in {"none", "1", "2", "3"}:
+        return _verdict("FAILED", "policy_violation", phase="dispatch", child_created=created)
+    if len(waits) != 1:
+        return _verdict("FAILED", "policy_violation", phase="dispatch", child_created=created)
+    wait_index, wait_call = waits[0]
     try:
-        child_context = _turn_context(
-            child_events,
-            required_fields=("model", "effort"),
-        )
-    except EvidenceError as exc:
-        reason = (
-            "child_context_conflict"
-            if "conflicts" in str(exc)
-            else "child_context_invalid"
-        )
-        return _verdict(
-            "FAILED",
-            reason,
-            parent_thread_id=parent_id,
-            child_thread_id=child_id,
-            parent_model=parent_model,
-        )
-    if child_session_id != child_id or child_parent_id != parent_id:
-        return _verdict(
-            "FAILED",
-            "parent_child_mismatch",
-            parent_thread_id=parent_id,
-            child_thread_id=child_id,
-            parent_model=parent_model,
-        )
-    if child_context is None:
-        return _verdict(
-            "FAILED",
-            "child_evidence_missing",
-            parent_thread_id=parent_id,
-            child_thread_id=child_id,
-            parent_model=parent_model,
-        )
-
-    child_model = child_context.get("model")
-    child_effort = child_context.get("effort")
-    if child_model != expected_role.model:
-        return _verdict(
-            "FAILED",
-            "child_model_mismatch",
-            parent_thread_id=parent_id,
-            child_thread_id=child_id,
-            parent_model=parent_model,
-            child_model=child_model,
-        )
-    if child_effort != expected_role.effort:
-        return _verdict(
-            "FAILED",
-            "child_effort_mismatch",
-            parent_thread_id=parent_id,
-            child_thread_id=child_id,
-            parent_model=parent_model,
-            child_model=child_model,
-        )
-    if child_model == parent_model:
-        return _verdict(
-            "FAILED",
-            "inherited_parent_model",
-            parent_thread_id=parent_id,
-            child_thread_id=child_id,
-            parent_model=parent_model,
-            child_model=child_model,
-        )
-
-    if expected_namespace == "collaboration" and not adapter_free:
-        return _verdict(
-            "FAILED",
-            "native_adapter_state_unproven",
-            parent_thread_id=parent_id,
-            child_thread_id=child_id,
-            parent_model=parent_model,
-            child_model=child_model,
-        )
-
-    status = "NATIVE_OK" if expected_namespace == "collaboration" else "ADAPTER_OK"
-    return _verdict(
-        status,
-        "verified_distinct_model",
-        parent_thread_id=parent_id,
-        child_thread_id=child_id,
-        parent_model=parent_model,
-        child_model=child_model,
-    )
+        wait_args = json.loads(wait_call.get("arguments", ""))
+    except (TypeError, json.JSONDecodeError):
+        return _verdict("FAILED", "policy_violation", phase="dispatch", child_created=created)
+    if wait_index <= call_index or wait_args != {"timeout_ms": 30000}:
+        return _verdict("FAILED", "policy_violation", phase="dispatch", child_created=created)
+    call_id = call.get("call_id")
+    matched = [a for a in activities if a.get("event_id") == call_id]
+    if not isinstance(call_id, str) or not call_id or len(matched) != 1:
+        return _verdict("SKIPPED", "native_spawn_evidence_missing", child_created=created)
+    if not versions:
+        return _verdict("SKIPPED", "native_v2_selection_unobservable", child_created="yes")
+    if versions != {"v2"}:
+        return _verdict("FAILED", "native_v2_selection_mismatch", child_created="yes")
+    child_id = matched[0].get("agent_thread_id")
+    parent_id = next((p.get("id") for p in _payloads(parent_events, "session_meta") if isinstance(p.get("id"), str)), None)
+    contexts = _payloads(child_events, "turn_context")
+    sessions = _payloads(child_events, "session_meta")
+    if not contexts or not sessions:
+        return _verdict("SKIPPED", "child_evidence_missing", child_created="yes")
+    context = contexts[0]
+    model, effort = context.get("model"), context.get("effort")
+    if not isinstance(model, str) or not model or not isinstance(effort, str) or not effort:
+        return _verdict("SKIPPED", "child_binding_unobservable", child_created="yes")
+    session = sessions[0]
+    if session.get("id") != child_id or session.get("parent_thread_id") != parent_id:
+        return _verdict("FAILED", "parent_child_mismatch", child_created="yes")
+    if model != expected_role.model:
+        return _verdict("FAILED", "child_model_mismatch", child_created="yes")
+    if effort != expected_role.effort:
+        return _verdict("FAILED", "child_effort_mismatch", child_created="yes")
+    parent_model = parent_contexts[0].get("model") if parent_contexts else None
+    if model == parent_model:
+        return _verdict("FAILED", "inherited_parent_model", child_created="yes")
+    return _verdict("NATIVE_OK", "native_verified", child_created="yes", role=expected_role_name, task_name=task, fork_turns=args["fork_turns"], parent_ref=_short_ref(parent_id), child_ref=_short_ref(child_id), model=model, reasoning_effort=effort)
 
 
-class ReceiptError(ValueError):
-    """Raised when a local audit receipt cannot be safely created."""
+def load_jsonl(path: Path) -> list[dict]:
+    events: list[dict] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip(): continue
+        try: event = json.loads(line)
+        except json.JSONDecodeError as exc: raise EvidenceError("invalid JSON rollout") from exc
+        if not isinstance(event, dict): raise EvidenceError("rollout event is not an object")
+        events.append(event)
+    if not events: raise EvidenceError("rollout is empty")
+    return events
 
 
-def _receipt_root(codex_home: Path) -> Path:
-    return (codex_home / "dispatch-receipts").resolve()
+def parse_exec_thread_id(output: str) -> str:
+    values = set()
+    for line in output.splitlines():
+        if not line.strip(): continue
+        try: event = json.loads(line)
+        except json.JSONDecodeError as exc: raise EvidenceError("exec output is not JSON") from exc
+        if not isinstance(event, dict): raise EvidenceError("exec event is not an object")
+        if event.get("type") == "thread.started":
+            value = event.get("thread_id") or (event.get("thread") or {}).get("id")
+            if isinstance(value, str) and value: values.add(value)
+    if len(values) != 1: raise EvidenceError("expected one parent thread ID")
+    return values.pop()
 
 
-def _inside(path: Path, root: Path) -> bool:
+def locate_rollout(sessions_root: Path, thread_id: str) -> Path:
+    """Find one exact thread-suffixed rollout during the explicit live smoke."""
     try:
-        path.resolve().relative_to(root.resolve())
-    except ValueError:
-        return False
-    return True
-
-
-def prepare_receipt_destination(
-    *,
-    codex_home: Path,
-    role: str,
-    receipt: Path | None = None,
-    receipt_dir: Path | None = None,
-    name: str | None = None,
-) -> ReceiptDestination:
-    """Validate and create a private receipt destination before live dispatch."""
-    if role not in ROLE_NAMES and role != "matrix":
-        raise ReceiptError(f"unsupported receipt role: {role}")
-    root = _receipt_root(codex_home)
-    directory = root if receipt_dir is None else receipt_dir
-    if not directory.is_absolute():
-        directory = root / directory
-    if not _inside(directory, root):
-        raise ReceiptError("receipt directory must be under dispatch-receipts")
-    try:
-        root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        root.chmod(0o700)
-        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-        directory.chmod(0o700)
+        root = sessions_root.resolve(strict=True)
     except OSError as exc:
-        raise ReceiptError(f"cannot create receipt directory: {exc}") from exc
-    if not _inside(directory, root):
-        raise ReceiptError("receipt directory resolves outside dispatch-receipts")
-
-    if receipt is not None:
-        if receipt.is_absolute():
-            target = receipt
-        else:
-            target = directory / receipt
-    else:
-        target = directory / (name or f"{task_name_for_role(role)}-{uuid.uuid4().hex}.json")
-    if not target.name or target.suffix != ".json":
-        raise ReceiptError("receipt name must end in .json")
-    if target.parent.resolve() != directory.resolve() or not _inside(target, root):
-        raise ReceiptError("receipt must be a direct file under the receipt directory")
-    if target.exists():
-        raise ReceiptError("receipt already exists")
-    return ReceiptDestination(directory=directory.resolve(), receipt_path=target)
+        raise EvidenceError("session store is unavailable") from exc
+    suffix = f"-{thread_id}.jsonl"
+    matches = [
+        path.resolve() for path in root.rglob("*.jsonl")
+        if path.name.endswith(suffix) and path.is_file() and _inside(path, root)
+    ]
+    if len(matches) != 1:
+        raise EvidenceError("expected one exact rollout")
+    return matches[0]
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
+def child_thread_from_parent(events: list[dict]) -> str:
+    calls = [p for p in _payloads(events, "response_item") if p.get("type") == "function_call" and p.get("name") == "spawn_agent"]
+    if len(calls) != 1 or not isinstance(calls[0].get("call_id"), str):
+        raise EvidenceError("typed spawn is unobservable")
+    activities = [p for p in _payloads(events, "event_msg") if p.get("type") == "sub_agent_activity" and p.get("kind") == "started" and p.get("event_id") == calls[0]["call_id"]]
+    if len(activities) != 1 or not isinstance(activities[0].get("agent_thread_id"), str):
+        raise EvidenceError("child activity is unobservable")
+    return activities[0]["agent_thread_id"]
+
+
+def inspect_available_evidence(home: Path, stdout: str, binding: RoleBinding, role: str) -> tuple[Verdict | None, bool]:
+    """Inspect bounded rollout evidence and retain the spawn-attempt boundary."""
     try:
-        with path.open("rb") as handle:
-            for block in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(block)
-    except OSError as exc:
-        raise ReceiptError(f"cannot hash rollout evidence: {exc}") from exc
-    return digest.hexdigest()
-
-
-def _rollout_record(path: Path, sessions_root: Path) -> dict[str, str]:
-    try:
-        reference = path.resolve().relative_to(sessions_root.resolve()).as_posix()
-    except ValueError as exc:
-        raise ReceiptError("rollout evidence is outside the session store") from exc
-    return {"ref": reference, "sha256": _sha256(path)}
-
-
-def _optional_sha256(path: Path | None) -> str | None:
-    if path is None or not path.is_file():
-        return None
-    try:
-        return _sha256(path)
-    except ReceiptError:
-        return None
-
-
-def _repository_version(repository_root: Path | None) -> str | None:
-    if repository_root is None:
-        return None
-    try:
-        version = (repository_root / "VERSION").read_text(encoding="utf-8").strip()
-    except OSError:
-        return None
-    return version or None
-
-
-def _codex_version(codex_bin: str | None) -> str | None:
-    if not codex_bin:
-        return None
-    try:
-        completed = subprocess.run(
-            [codex_bin, "--version"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError:
-        return None
-    if completed.returncode != 0:
-        return None
-    version = completed.stdout.strip().splitlines()
-    return version[0] if version else None
-
-
-def _observed_child_effort(path: Path | None) -> str | None:
-    if path is None:
-        return None
-    try:
-        context = _turn_context(load_jsonl(path), required_fields=("model", "effort"))
-    except EvidenceError:
-        return None
-    return context.get("effort") if context is not None else None
-
-
-def receipt_payload(
-    *,
-    role: str,
-    verdict: Verdict,
-    sessions_root: Path,
-    evidence: LiveEvidence,
-    repository_root: Path | None = None,
-    codex_home: Path | None = None,
-    codex_bin: str | None = None,
-    mode: str = "adapter",
-    parent_model: str | None = None,
-    expected_namespace: str | None = None,
-    task_name: str | None = None,
-) -> dict:
-    """Build redacted, post-hoc-only receipt data without command transcripts."""
-    rollouts: dict[str, dict[str, str]] = {}
-    if evidence.parent_rollout is not None:
-        rollouts["parent"] = _rollout_record(evidence.parent_rollout, sessions_root)
-    if evidence.child_rollout is not None:
-        rollouts["child"] = _rollout_record(evidence.child_rollout, sessions_root)
-
-    template_role = (
-        repository_root / "templates" / "agents" / f"{role}.toml"
-        if repository_root is not None
-        else None
-    )
-    installed_role = (
-        codex_home / "agents" / f"{role}.toml"
-        if codex_home is not None
-        else None
-    )
-    config = codex_home / "config.toml" if codex_home is not None else None
-    template_hash = _optional_sha256(template_role)
-    installed_hash = _optional_sha256(installed_role)
-    config_hash = _optional_sha256(config)
-    started_at = evidence.started_at_utc or datetime.now(timezone.utc).isoformat()
-    ended_at = evidence.ended_at_utc or started_at
-    observed_codex_version = _codex_version(codex_bin)
-
-    return {
-        "schema_version": RECEIPT_VERSION,
-        "version": RECEIPT_VERSION,
-        "schema": "dispatch-receipt/v1",
-        "kind": "dispatch-receipt",
-        "timestamps": {
-            "started_at_utc": started_at,
-            "ended_at_utc": ended_at,
-        },
-        "tool": {
-            "repository_version": _repository_version(repository_root),
-            "codex_version": observed_codex_version,
-        },
-        "request": {
-            "mode": mode,
-            "role": role,
-            "task_name": task_name or task_name_for_role(role),
-            "parent_model": parent_model,
-            "expected_namespace": expected_namespace,
-            "fork_turns": "none",
-        },
-        "preflight": {
-            "template_role_sha256": template_hash,
-            "installed_role_sha256": installed_hash,
-            "config_sha256": config_hash,
-            "role_drift": (
-                template_hash is not None
-                and installed_hash is not None
-                and template_hash != installed_hash
-            ),
-        },
-        "observation": {
-            "stage": (
-                "verified"
-                if verdict.status in {"ADAPTER_OK", "NATIVE_OK"}
-                else "observed" if evidence.parent_rollout is not None else "preflight"
-            ),
-            "route_observation": verdict.route_observation,
-            "parent_thread_id": verdict.parent_thread_id,
-            "child_thread_id": verdict.child_thread_id,
-            "parent_model": verdict.parent_model,
-            "child_model": verdict.child_model,
-            "child_effort": _observed_child_effort(evidence.child_rollout),
-            "rollouts": rollouts,
-        },
-        "verdict": {
-            "status": verdict.status,
-            "reason": verdict.reason,
-            "exit_code": _exit_code(verdict.status),
-        },
-        # Keep these aliases for consumers of the original receipt shape.
-        "role": role,
-        "status": verdict.status,
-        "reason": verdict.reason,
-        "route_observation": verdict.route_observation,
-        "rollouts": rollouts,
-    }
-
-
-def write_receipt(destination: ReceiptDestination, payload: dict) -> Path:
-    """Atomically publish one mode-0600 receipt without replacing any file."""
-    try:
-        descriptor, temporary_name = tempfile.mkstemp(
-            prefix=".dispatch-receipt-", suffix=".tmp", dir=destination.directory
-        )
-        temporary = Path(temporary_name)
-        os.fchmod(descriptor, 0o600)
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
+        parent_id = parse_exec_thread_id(stdout)
+        parent_events = load_jsonl(locate_rollout(home / "sessions", parent_id))
+        boundary = any(p.get("type") == "function_call" and p.get("name") == "spawn_agent" for p in _payloads(parent_events, "response_item"))
         try:
-            os.link(temporary, destination.receipt_path)
-        except FileExistsError as exc:
-            raise ReceiptError("receipt already exists") from exc
-        finally:
-            temporary.unlink(missing_ok=True)
-        destination.receipt_path.chmod(0o600)
+            child_id = child_thread_from_parent(parent_events)
+            child_events = load_jsonl(locate_rollout(home / "sessions", child_id))
+        except EvidenceError:
+            child_events = []
+        return inspect_dispatch(parent_events, child_events, expected_role=binding, expected_role_name=role), boundary
+    except EvidenceError:
+        return None, False
+
+
+def receipt_payload(verdict: Verdict, *, codex_version: str, active: dict[str, str], target: dict[str, str]) -> dict:
+    payload = {
+        "status": verdict.status, "reason_code": verdict.reason_code, "phase": verdict.phase,
+        "child_created": verdict.child_created, "codex_version": codex_version,
+        "active_config_sha256": active["config"], "active_role_manifest_sha256": active["role_manifest"], "active_policy_sha256": active["policy"],
+        "target_config_sha256": target["config"], "target_role_manifest_sha256": target["role_manifest"], "target_policy_sha256": target["policy"],
+    }
+    for key in ("role", "task_name", "fork_turns", "parent_ref", "child_ref", "model", "reasoning_effort"):
+        value = getattr(verdict, key)
+        if value is not None: payload[key] = value
+    validate_receipt(payload)
+    return payload
+
+
+def validate_receipt(payload: dict) -> None:
+    required = {"status", "reason_code", "phase", "child_created", "codex_version",
+                "active_config_sha256", "active_role_manifest_sha256", "active_policy_sha256",
+                "target_config_sha256", "target_role_manifest_sha256", "target_policy_sha256"}
+    if not isinstance(payload, dict) or not required <= set(payload) or set(payload) - RECEIPT_KEYS:
+        raise ReceiptError("receipt keys are invalid")
+    if (payload["phase"], payload["reason_code"], payload["status"]) not in MATRIX:
+        raise ReceiptError("receipt reason matrix row is invalid")
+    if payload["child_created"] not in {"no", "yes", "unknown"}:
+        raise ReceiptError("receipt child_created is invalid")
+    version = payload["codex_version"]
+    if version != "unknown" and not re.fullmatch(r"\d+\.\d+\.\d+", str(version)):
+        raise ReceiptError("receipt version is invalid")
+    hashes = [key for key in required if key.endswith("sha256")]
+    if any(not isinstance(payload[key], str) or not re.fullmatch(r"[0-9a-f]{64}", payload[key]) for key in hashes):
+        raise ReceiptError("receipt hashes are invalid")
+    evidence = {"role", "task_name", "fork_turns", "parent_ref", "child_ref", "model", "reasoning_effort", "sandbox"}
+    if payload["phase"] in {"preflight", "execution-pre-child"} and evidence & set(payload):
+        raise ReceiptError("pre-child receipt contains observed child evidence")
+    if payload["phase"] == "preflight" and payload["child_created"] != "no":
+        raise ReceiptError("preflight receipt child state is invalid")
+    allowed_children = {
+        "preflight": {"no"}, "execution-pre-child": {"no", "unknown"},
+        "post-spawn": {"yes", "unknown"}, "dispatch": {"yes", "unknown"},
+    }
+    if payload["child_created"] not in allowed_children[payload["phase"]]:
+        raise ReceiptError("receipt phase/child state is impossible")
+    if payload["reason_code"] == "child_evidence_missing" and payload["child_created"] == "no":
+        raise ReceiptError("child evidence row has impossible child state")
+    if payload["phase"] == "dispatch" and payload["child_created"] == "no":
+        raise ReceiptError("dispatch receipt child state is invalid")
+    if payload["phase"] == "execution-pre-child" and payload["reason_code"] == "codex_exec_failed" and payload["child_created"] == "yes":
+        raise ReceiptError("pre-child execution failure cannot claim a child")
+    child_bound_reasons = {"parent_child_mismatch", "child_binding_unobservable", "child_binding_mismatch", "child_model_mismatch", "child_effort_mismatch", "inherited_parent_model", "native_verified"}
+    if payload["reason_code"] in child_bound_reasons and payload["child_created"] != "yes":
+        raise ReceiptError("child-bound receipt lacks observed child")
+    if payload["status"] == "NATIVE_OK" and (payload["codex_version"] != "0.145.0" or payload["active_config_sha256"] != payload["target_config_sha256"] or payload["active_role_manifest_sha256"] != payload["target_role_manifest_sha256"] or payload["active_policy_sha256"] != payload["target_policy_sha256"]):
+        raise ReceiptError("NATIVE_OK receipt has invalid version or hash equality")
+    if "role" in payload and (not isinstance(payload["role"], str) or payload["role"] not in ROLES):
+        raise ReceiptError("role evidence is invalid")
+    if "task_name" in payload and (not isinstance(payload["task_name"], str) or not TASK_NAME_RE.fullmatch(payload["task_name"])):
+        raise ReceiptError("task evidence is invalid")
+    if "fork_turns" in payload and (not isinstance(payload["fork_turns"], str) or payload["fork_turns"] not in {"none", "1", "2", "3"}):
+        raise ReceiptError("fork evidence is invalid")
+    for field in ("model", "reasoning_effort"):
+        if field in payload and (not isinstance(payload[field], str) or not payload[field].strip()):
+            raise ReceiptError("model evidence is invalid")
+    if "sandbox" in payload and not isinstance(payload["sandbox"], (str, dict)):
+        raise ReceiptError("sandbox evidence is invalid")
+    if "sandbox" in payload and not payload["sandbox"]:
+        raise ReceiptError("sandbox must be observed")
+    for ref in ("parent_ref", "child_ref"):
+        if ref in payload and (not isinstance(payload[ref], str) or not payload[ref] or not re.fullmatch(r"[0-9a-f]{16}", payload[ref])):
+            raise ReceiptError("receipt reference leaks runtime data")
+    for key, value in payload.items():
+        if key in {"parent_ref", "child_ref"}:
+            continue
+        if isinstance(value, str) and ("/" in value or "\\" in value or "secret" in value.lower()):
+            raise ReceiptError("receipt contains path or secret data")
+    if payload["status"] == "NATIVE_OK":
+        needed = {"role", "task_name", "fork_turns", "parent_ref", "child_ref", "model", "reasoning_effort"}
+        if payload["phase"] != "post-spawn" or payload["child_created"] != "yes" or not needed <= set(payload) or payload["role"] not in ROLES or not TASK_NAME_RE.fullmatch(str(payload["task_name"])) or payload["fork_turns"] not in {"none", "1", "2", "3"} or not isinstance(payload["model"], str) or not payload["model"].strip() or not isinstance(payload["reasoning_effort"], str) or not payload["reasoning_effort"].strip():
+            raise ReceiptError("NATIVE_OK receipt lacks core evidence")
+
+
+def receipt_destination(home: Path, requested: Path | None, role: str) -> Path:
+    root = home / "dispatch-receipts"
+    path = root / f"{task_name_for_role(role)}.json" if requested is None else requested
+    if not path.is_absolute():
+        path = root / path
+    try:
+        path.parent.resolve(strict=False).relative_to(root.resolve(strict=False))
+    except ValueError as exc:
+        raise ReceiptError("receipt_destination_invalid") from exc
+    if path.suffix != ".json" or path.name == ".json" or path.exists():
+        raise ReceiptError("receipt_destination_invalid")
+    return path
+
+
+def write_receipt(path: Path, payload: dict) -> None:
+    validate_receipt(payload)
+    if path.exists() or path.suffix != ".json": raise ReceiptError("receipt destination already exists or is invalid")
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix=".receipt-", dir=path.parent)
+    temp = Path(name)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, sort_keys=True, separators=(",", ":")); handle.write("\n"); handle.flush(); os.fsync(handle.fileno())
+        os.link(temp, path)
+    except OSError as exc:
+        raise ReceiptError("receipt_write_failed") from exc
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def _clean_cwd(cwd: Path, repository_root: Path, markers: list[str]) -> bool:
+    try:
+        cwd_real, repo_real = cwd.resolve(strict=True), repository_root.resolve(strict=True)
+    except OSError: return False
+    try: cwd_real.relative_to(repo_real); return False
+    except ValueError: pass
+    current = cwd_real
+    while True:
+        if any((current / name).exists() for name in ("AGENTS.md", "AGENTS.override.md", ".codex", *markers)): return False
+        if current == current.parent: return True
+        current = current.parent
+
+
+def _preflight(args: argparse.Namespace) -> tuple[dict[str, str], dict[str, str], RoleBinding] | Verdict:
+    try:
+        active_home, staged_home = validate_home_pair(args.active_codex_home, args.codex_home)
+        reason = validate_stage_layout(active_home, active_home=True)
+        if reason: return _verdict("FAILED", reason, phase="preflight", child_created="no")
+        active_hash = hash_inputs(active_home)
+        reason = validate_stage_layout(staged_home)
+        if reason: return _verdict("FAILED", reason, phase="preflight", child_created="no")
+        target_hash = hash_inputs(staged_home)
     except ReceiptError:
         raise
-    except OSError as exc:
-        raise ReceiptError(f"cannot write receipt: {exc}") from exc
-    return destination.receipt_path
-
-
-def _print_verdict(verdict: Verdict) -> None:
-    if verdict.status == "FAILED":
-        print(
-            "warning: routing verification failed; stop named-role dispatch "
-            "to avoid unintended parent-model cost",
-            file=sys.stderr,
-        )
-    fields = [verdict.status, f"reason={verdict.reason}"]
-    for name in (
-        "parent_thread_id",
-        "child_thread_id",
-        "parent_model",
-        "child_model",
-    ):
-        value = getattr(verdict, name)
-        if value is not None:
-            fields.append(f"{name}={value}")
-    print(" ".join(fields))
-
-
-def _exit_code(status: str) -> int:
-    if status in {"ADAPTER_OK", "NATIVE_OK"}:
-        return 0
-    if status == "SKIPPED":
-        return 2
-    return 1
-
-
-def classify_exec_failure(*, stdout: str, stderr: str) -> Verdict:
-    """Map an unsuccessful Codex process to a stable fail-closed verdict."""
-    diagnostic = f"{stdout}\n{stderr}".lower()
-    if "not logged in" in diagnostic or "authentication" in diagnostic:
-        return _verdict("SKIPPED", "auth_unavailable")
-    if "model" in diagnostic and "unavailable" in diagnostic:
-        return _verdict("SKIPPED", "parent_model_unavailable")
-    return _verdict("FAILED", "codex_exec_failed")
-
-
-def _preflight(
-    *,
-    codex_bin: str,
-    codex_home: Path,
-    repository_root: Path,
-    mode: str,
-    parent_model: str,
-    role: str = "scout",
-) -> tuple[RoleBinding | None, Verdict | None]:
-    if role not in ROLE_NAMES:
-        return None, _verdict("FAILED", "role_preflight_failed", route_observation="not_attempted")
-    template_role = repository_root / "templates" / "agents" / f"{role}.toml"
-    installed_role = codex_home / "agents" / f"{role}.toml"
+    if active_hash != target_hash:
+        return _verdict("FAILED", "target_hash_mismatch", phase="preflight", child_created="no")
+    for role in ROLES:
+        installed = staged_home / "agents" / f"{role}.toml"
+        packaged = args.repository_root / "templates" / "agents" / f"{role}.toml"
+        if not installed.is_file() or not packaged.is_file() or installed.read_bytes() != packaged.read_bytes():
+            return _verdict("FAILED", "installed_role_drift", phase="preflight", child_created="no")
     try:
-        template_config = read_role_config(template_role)
-        installed_config = read_role_config(installed_role)
-        expected = read_role_binding(template_role)
-    except EvidenceError as exc:
-        print(f"role preflight failed: {exc}", file=sys.stderr)
-        return None, _verdict("FAILED", "role_preflight_failed")
-
-    if installed_config != template_config:
-        return None, _verdict("FAILED", "installed_role_drift")
-    if parent_model == expected.model:
-        return None, _verdict("FAILED", "parent_model_not_distinct")
-
-    if mode == "adapter":
-        config_errors, config_warnings = validate_config(codex_home / "config.toml")
-        for warning in config_warnings:
-            print(f"warning: {warning}", file=sys.stderr)
-        if config_errors:
-            print("\n".join(config_errors), file=sys.stderr)
-            return None, _verdict("FAILED", "adapter_config_invalid")
-
-        try:
-            with (codex_home / "config.toml").open("rb") as handle:
-                config = tomllib.load(handle)
-            concurrency = config["features"]["multi_agent_v2"][
-                "max_concurrent_threads_per_session"
-            ]
-        except (OSError, KeyError, tomllib.TOMLDecodeError):
-            return None, _verdict("FAILED", "adapter_config_invalid")
-        if concurrency == 1:
-            return None, _verdict("SKIPPED", "child_delegation_disabled")
-
-    try:
-        version = subprocess.run(
-            [codex_bin, "--version"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError:
-        return None, _verdict("SKIPPED", "codex_unavailable")
-    if version.returncode != 0:
-        return None, _verdict("SKIPPED", "codex_unavailable")
-
-    login = subprocess.run(
-        [codex_bin, "login", "status"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if login.returncode != 0:
-        return None, _verdict("SKIPPED", "auth_unavailable")
-    return expected, None
+        with (staged_home / "config.toml").open("rb") as handle:
+            marker_config = tomllib.load(handle).get("project_root_markers", [".git"])
+    except (OSError, tomllib.TOMLDecodeError):
+        return _verdict("FAILED", "stage_layout_untrusted", phase="preflight", child_created="no")
+    if not isinstance(marker_config, list) or not all(isinstance(marker, str) for marker in marker_config):
+        return _verdict("FAILED", "stage_layout_untrusted", phase="preflight", child_created="no")
+    if not _clean_cwd(args.codex_cwd, args.repository_root, marker_config):
+        return _verdict("FAILED", "smoke_cwd_untrusted", phase="preflight", child_created="no")
+    role_path = staged_home / "agents" / f"{args.role}.toml"
+    binding = read_role_binding(role_path)
+    if binding.model == args.parent_model:
+        return _verdict("FAILED", "parent_model_not_distinct", phase="preflight", child_created="no")
+    return active_hash, target_hash, binding
 
 
-def _execute_live(
-    args: argparse.Namespace, *, role: str, expected: RoleBinding
-) -> tuple[Verdict, LiveEvidence]:
-    """Run one quota-bearing probe after preflight and receipt validation."""
-    print(
-        "warning: this live dispatch probe spends real model quota",
-        file=sys.stderr,
-    )
-    command = build_codex_command(
-        codex_bin=args.codex_bin,
-        cwd=args.repository_root,
-        mode=args.mode,
-        parent_model=args.parent_model,
-        role=role,
-        task_name=task_name_for_role(role),
-    )
-    started_local = datetime.now().astimezone()
-    completed = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        stdin=subprocess.DEVNULL,
-        check=False,
-    )
-    ended_local = datetime.now().astimezone()
-    started_at_utc = started_local.astimezone(timezone.utc).isoformat()
-    ended_at_utc = ended_local.astimezone(timezone.utc).isoformat()
-    if completed.returncode != 0:
-        verdict = _with_route_observation(
-            classify_exec_failure(stdout=completed.stdout, stderr=completed.stderr),
-            "not_observed",
-        )
-        if verdict.status == "FAILED":
-            print(completed.stderr.strip(), file=sys.stderr)
-        return verdict, LiveEvidence(
-            started_at_utc=started_at_utc,
-            ended_at_utc=ended_at_utc,
-        )
-
-    sessions_root = args.codex_home / "sessions"
-    try:
-        parent_id = parse_exec_thread_id(completed.stdout)
-        directories = candidate_day_directories(sessions_root, started_local, ended_local)
-        utc_directories = candidate_day_directories(
-            sessions_root,
-            started_local.astimezone(timezone.utc),
-            ended_local.astimezone(timezone.utc),
-        )
-        bounded_directories = list(dict.fromkeys(directories + utc_directories))
-        parent_path = locate_rollout(sessions_root, parent_id, bounded_directories)
-        parent_events = load_jsonl(parent_path)
-    except EvidenceError as exc:
-        print(str(exc), file=sys.stderr)
-        return _verdict("FAILED", "rollout_evidence_invalid"), LiveEvidence(
-            started_at_utc=started_at_utc,
-            ended_at_utc=ended_at_utc,
-        )
-
-    evidence = LiveEvidence(
-        parent_rollout=parent_path,
-        started_at_utc=started_at_utc,
-        ended_at_utc=ended_at_utc,
-    )
-    namespace = "agents" if args.mode == "adapter" else "collaboration"
-    try:
-        child_id = extract_child_thread_id(
-            parent_events, expected_task_name=task_name_for_role(role)
-        )
-    except EvidenceError as exc:
-        candidate = inspect_dispatch(
-            parent_events,
-            [],
-            expected_role=expected,
-            expected_namespace=namespace,
-            expected_role_name=role,
-            expected_task_name=task_name_for_role(role),
-        )
-        if candidate.reason == "requested_role_not_executed":
-            return candidate, evidence
-        print(str(exc), file=sys.stderr)
-        return _verdict("FAILED", "rollout_evidence_invalid"), evidence
-
-    try:
-        child_path = locate_rollout(
-            sessions_root, child_id, [parent_path.parent, *bounded_directories]
-        )
-        child_events = load_jsonl(child_path)
-    except EvidenceError as exc:
-        print(str(exc), file=sys.stderr)
-        return _verdict("FAILED", "rollout_evidence_invalid"), evidence
-
-    return (
-        inspect_dispatch(
-            parent_events,
-            child_events,
-            expected_role=expected,
-            expected_namespace=namespace,
-            expected_role_name=role,
-            expected_task_name=task_name_for_role(role),
-        ),
-        LiveEvidence(
-            parent_rollout=parent_path,
-            child_rollout=child_path,
-            started_at_utc=started_at_utc,
-            ended_at_utc=ended_at_utc,
-        ),
-    )
-
-
-def _live_verify(args: argparse.Namespace) -> Verdict:
-    """Compatibility wrapper for callers that need only a single verdict."""
-    if args.mode == "native":
-        return _verdict("SKIPPED", "native_schema_introspection_unavailable", route_observation="not_attempted")
-    expected, preflight_verdict = _preflight(
-        codex_bin=args.codex_bin,
-        codex_home=args.codex_home,
-        repository_root=args.repository_root,
-        mode=args.mode,
-        parent_model=args.parent_model,
-        role=args.role,
-    )
-    if preflight_verdict is not None:
-        return _with_route_observation(preflight_verdict, "not_attempted")
-    assert expected is not None
-    return _execute_live(args, role=args.role, expected=expected)[0]
-
-
-def _execute_live_or_preflight(
-    args: argparse.Namespace, role: str
-) -> tuple[Verdict, LiveEvidence]:
-    expected, preflight_verdict = _preflight(
-        codex_bin=args.codex_bin,
-        codex_home=args.codex_home,
-        repository_root=args.repository_root,
-        mode=args.mode,
-        parent_model=args.parent_model,
-        role=role,
-    )
-    if preflight_verdict is not None:
-        return _with_route_observation(preflight_verdict, "not_attempted"), LiveEvidence()
-    assert expected is not None
-    return _execute_live(args, role=role, expected=expected)
-
-
-def _write_role_receipt(
-    *,
-    args: argparse.Namespace,
-    role: str,
-    verdict: Verdict,
-    evidence: LiveEvidence,
-    destination: ReceiptDestination,
-) -> Verdict:
-    try:
-        write_receipt(
-            destination,
-            receipt_payload(
-                role=role,
-                verdict=verdict,
-                sessions_root=args.codex_home / "sessions",
-                evidence=evidence,
-                repository_root=getattr(args, "repository_root", None),
-                codex_home=args.codex_home,
-                codex_bin=getattr(args, "codex_bin", None),
-                mode=getattr(args, "mode", "adapter"),
-                parent_model=getattr(args, "parent_model", None),
-                expected_namespace=(
-                    "agents" if getattr(args, "mode", "adapter") == "adapter" else "collaboration"
-                ),
-                task_name=task_name_for_role(role),
-            ),
-        )
-    except ReceiptError as exc:
-        print(f"receipt write failed: {exc}", file=sys.stderr)
-        if verdict.status == "ADAPTER_OK":
-            return _verdict(
-                "FAILED",
-                "receipt_write_failed",
-                route_observation=verdict.route_observation,
-            )
-    else:
-        print(f"receipt: {destination.receipt_path}", file=sys.stderr)
-    return verdict
-
-
-def _matrix_manifest_payload(results: list[tuple[str, Verdict, Path]]) -> dict:
-    all_verified = all(verdict.status == "ADAPTER_OK" for _, verdict, _ in results)
-    return {
-        "version": RECEIPT_VERSION,
-        "schema": "dispatch-receipt-matrix/v1",
-        "kind": "dispatch-receipt-matrix",
-        "recorded_at": datetime.now(timezone.utc).isoformat(),
-        "status": "ADAPTER_OK" if all_verified else "FAILED",
-        "reason": "matrix_verified_all_roles" if all_verified else "matrix_role_failed",
-        "roles": [
-            {
-                "role": role,
-                "status": verdict.status,
-                "reason": verdict.reason,
-                "route_observation": verdict.route_observation,
-                "receipt": path.name,
-            }
-            for role, verdict, path in results
-        ],
-    }
-
-
-def _receipt_destinations(args: argparse.Namespace, roles: tuple[str, ...]) -> dict[str, ReceiptDestination]:
-    if args.all_roles and args.receipt is not None:
-        raise ReceiptError("--receipt is only valid for a single-role probe")
-    return {
-        role: prepare_receipt_destination(
-            codex_home=args.codex_home,
-            role=role,
-            receipt=args.receipt if role == args.role and not args.all_roles else None,
-            receipt_dir=args.receipt_dir,
-        )
-        for role in roles
-    }
-
-
-def _run_matrix(
-    args: argparse.Namespace,
-    destinations: dict[str, ReceiptDestination],
-    manifest_destination: ReceiptDestination | None = None,
-) -> Verdict:
-    """Preflight every role, then probe sequentially and retain a full audit trail."""
-    preflight: dict[str, RoleBinding] = {}
-    preflight_failures: dict[str, Verdict] = {}
-    for role in ROLE_NAMES:
-        expected, verdict = _preflight(
-            codex_bin=args.codex_bin,
-            codex_home=args.codex_home,
-            repository_root=args.repository_root,
-            mode=args.mode,
-            parent_model=args.parent_model,
-            role=role,
-        )
-        if verdict is not None:
-            preflight_failures[role] = _with_route_observation(verdict, "not_attempted")
-        else:
-            assert expected is not None
-            preflight[role] = expected
-
-    results: list[tuple[str, Verdict, Path]] = []
-    stopped = bool(preflight_failures)
-    for role in ROLE_NAMES:
-        if role in preflight_failures:
-            verdict, evidence = preflight_failures[role], LiveEvidence()
-        elif stopped:
-            verdict = _verdict(
-                "SKIPPED", "matrix_not_attempted", route_observation="not_attempted"
-            )
-            evidence = LiveEvidence()
-        else:
-            verdict, evidence = _execute_live(args, role=role, expected=preflight[role])
-        verdict = _write_role_receipt(
-            args=args,
-            role=role,
-            verdict=verdict,
-            evidence=evidence,
-            destination=destinations[role],
-        )
-        results.append((role, verdict, destinations[role].receipt_path))
-        if verdict.status != "ADAPTER_OK":
-            stopped = True
-
-    if manifest_destination is None:
-        manifest_destination = prepare_receipt_destination(
-            codex_home=args.codex_home,
-            role="matrix",
-            receipt_dir=args.receipt_dir,
-            name=f"dispatch-matrix-{uuid.uuid4().hex}.json",
-        )
-    try:
-        write_receipt(manifest_destination, _matrix_manifest_payload(results))
-    except ReceiptError as exc:
-        print(f"receipt write failed: {exc}", file=sys.stderr)
-        return _verdict("FAILED", "receipt_write_failed", route_observation="not_observed")
-    print(f"receipt: {manifest_destination.receipt_path}", file=sys.stderr)
-    if all(verdict.status == "ADAPTER_OK" for _, verdict, _ in results):
-        return _verdict(
-            "ADAPTER_OK", "matrix_verified_all_roles", route_observation="typed_child_verified"
-        )
-    failed = next(verdict for _, verdict, _ in results if verdict.status != "ADAPTER_OK")
-    return _verdict(
-        "FAILED", "matrix_role_failed", route_observation=failed.route_observation
-    )
+def _print(verdict: Verdict) -> None:
+    print(f"{verdict.status} reason_code={verdict.reason_code} phase={verdict.phase} child_created={verdict.child_created}")
 
 
 def main(argv: list[str] | None = None) -> int:
-    repository_root = Path(__file__).resolve().parents[1]
-    default_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if any(arg == "--all-roles" or arg == "--mode" or arg.startswith("--mode=") for arg in raw):
+        print("cli_input_invalid", file=sys.stderr); return 1
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--live", action="store_true")
-    parser.add_argument("--yes", action="store_true")
-    parser.add_argument("--mode", choices=("adapter", "native"), default="adapter")
+    parser.add_argument("--live", action="store_true"); parser.add_argument("--yes", action="store_true")
     parser.add_argument("--role", choices=ROLE_NAMES, default="scout")
-    parser.add_argument("--receipt", type=Path)
-    parser.add_argument("--receipt-dir", type=Path)
-    parser.add_argument("--all-roles", action="store_true")
-    parser.add_argument("--matrix-yes", action="store_true")
     parser.add_argument("--codex-bin", default="codex")
-    parser.add_argument("--codex-home", type=Path, default=default_home)
-    parser.add_argument("--repository-root", type=Path, default=repository_root)
+    parser.add_argument("--codex-home", type=Path, required=True)
+    parser.add_argument("--active-codex-home", type=Path, required=True)
+    parser.add_argument("--repository-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--codex-cwd", type=Path, required=True)
     parser.add_argument("--parent-model", default="gpt-5.6-terra")
-    args = parser.parse_args(argv)
-
+    parser.add_argument("--receipt", type=Path)
+    parser.add_argument("--launch-capture", type=Path)
+    args = parser.parse_args(raw)
     if not args.live:
-        verdict = _verdict("SKIPPED", "live_flag_required", route_observation="not_attempted")
-    elif not args.yes:
-        verdict = _verdict("SKIPPED", "operator_opt_in_required", route_observation="not_attempted")
-    elif args.mode == "native":
-        verdict = _verdict("SKIPPED", "native_schema_introspection_unavailable", route_observation="not_attempted")
-    elif args.all_roles and not args.matrix_yes:
-        verdict = _verdict("SKIPPED", "matrix_operator_opt_in_required", route_observation="not_attempted")
-    else:
-        roles = ROLE_NAMES if args.all_roles else (args.role,)
+        _print(_verdict("SKIPPED", "live_flag_required", phase="preflight", child_created="no")); return 2
+    if not args.yes:
+        _print(_verdict("SKIPPED", "operator_opt_in_required", phase="preflight", child_created="no")); return 2
+    try:
+        destination = receipt_destination(args.codex_home, args.receipt, args.role)
+    except ReceiptError:
+        print("receipt_destination_invalid", file=sys.stderr); return 1
+    try:
+        preflight = _preflight(args)
+    except ReceiptError as exc:
+        print("home_input_invalid" if "home" in str(exc) else "hash_input_unavailable", file=sys.stderr); return 1
+    if isinstance(preflight, Verdict):
+        _print(preflight); return 1 if preflight.status == "FAILED" else 2
+    active_hash, target_hash, binding = preflight
+    if args.launch_capture is None:
+        verdict = _verdict("SKIPPED", "environment_binding_unobservable", phase="preflight", child_created="no")
         try:
-            destinations = _receipt_destinations(args, roles)
-        except ReceiptError as exc:
-            print(f"receipt destination failed: {exc}", file=sys.stderr)
-            verdict = _verdict("FAILED", "receipt_destination_invalid", route_observation="not_attempted")
+            write_receipt(destination, receipt_payload(verdict, codex_version="unknown", active=active_hash, target=target_hash))
+        except ReceiptError:
+            print("receipt_write_failed", file=sys.stderr); return 1
+        _print(verdict); return 2
+    try:
+        capture = json.loads(args.launch_capture.read_text(encoding="utf-8"))
+        expected = {"CODEX_HOME": str(args.codex_home), "CODEX_SQLITE_HOME": str(args.codex_home), "codex_cwd": str(args.codex_cwd)}
+        if not isinstance(capture, dict) or any(capture.get(key) != value for key, value in expected.items()):
+            verdict = _verdict("FAILED", "environment_binding_mismatch", phase="preflight", child_created="no")
+            write_receipt(destination, receipt_payload(verdict, codex_version="unknown", active=active_hash, target=target_hash))
+            _print(verdict); return 1
+    except (OSError, json.JSONDecodeError, ReceiptError):
+        print("environment_binding_unobservable", file=sys.stderr); return 2
+    try:
+        version_run = subprocess.run([args.codex_bin, "--version"], capture_output=True, text=True, check=False)
+        token = parse_codex_version(version_run.stdout + version_run.stderr) if version_run.returncode == 0 else None
+    except OSError:
+        token = None
+    if token is None:
+        verdict = _verdict("SKIPPED", "version_parse_failed", phase="preflight", child_created="no")
+    elif token != PINNED_CODEX_VERSION:
+        verdict = _verdict("FAILED", "version_not_pinned", phase="preflight", child_created="no")
+    else:
+        try:
+            login = subprocess.run([args.codex_bin, "login", "status"], capture_output=True, text=True, check=False)
+        except OSError:
+            login = None
+        if login is None or login.returncode != 0:
+            verdict = _verdict("SKIPPED", "auth_unavailable", phase="preflight", child_created="no")
         else:
-            if args.all_roles:
-                try:
-                    manifest_destination = prepare_receipt_destination(
-                        codex_home=args.codex_home,
-                        role="matrix",
-                        receipt_dir=args.receipt_dir,
-                        name=f"dispatch-matrix-{uuid.uuid4().hex}.json",
-                    )
-                except ReceiptError as exc:
-                    print(f"receipt destination failed: {exc}", file=sys.stderr)
-                    verdict = _verdict(
-                        "FAILED", "receipt_destination_invalid", route_observation="not_attempted"
-                    )
+            env = {"CODEX_HOME": str(args.codex_home), "CODEX_SQLITE_HOME": str(args.codex_home), **{k: v for k, v in os.environ.items() if k not in {"CODEX_HOME", "CODEX_SQLITE_HOME"}}}
+            if env.get("CODEX_HOME") != str(args.codex_home) or env.get("CODEX_SQLITE_HOME") != str(args.codex_home):
+                verdict = _verdict("FAILED", "environment_propagation_failed", phase="preflight", child_created="no")
+                payload = receipt_payload(verdict, codex_version="0.145.0", active=active_hash, target=target_hash)
+                write_receipt(destination, payload)
+                _print(verdict)
+                return 1
+            command = build_codex_command(codex_bin=args.codex_bin, cwd=args.codex_cwd, parent_model=args.parent_model, role=args.role)
+            before = snapshot_inputs(args.codex_home)
+            completed = subprocess.run(command, capture_output=True, text=True, stdin=subprocess.DEVNULL, env=env, check=False)
+            changed = snapshot_changed(args.codex_home, before)
+            observed, spawn_boundary = inspect_available_evidence(args.codex_home, completed.stdout, binding, args.role)
+            if completed.returncode:
+                if spawn_boundary:
+                    child_state = observed.child_created if observed is not None else "unknown"
+                    verdict = _verdict("FAILED", "codex_exec_failed_after_spawn", phase="post-spawn", child_created=child_state)
                 else:
-                    verdict = _run_matrix(args, destinations, manifest_destination)
+                    child_state = observed.child_created if observed is not None else "unknown"
+                    verdict = _verdict("FAILED", "codex_exec_failed", phase="execution-pre-child", child_created=child_state)
             else:
-                verdict, evidence = _execute_live_or_preflight(args, args.role)
-                verdict = _write_role_receipt(
-                    args=args,
-                    role=args.role,
-                    verdict=verdict,
-                    evidence=evidence,
-                    destination=destinations[args.role],
-                )
-
-    _print_verdict(verdict)
-    return _exit_code(verdict.status)
+                verdict = observed or _verdict("SKIPPED", "native_spawn_evidence_missing", child_created="unknown")
+            if changed:
+                phase = "post-spawn" if spawn_boundary else "execution-pre-child"
+                verdict = _verdict("FAILED", "snapshot_mutated", phase=phase, child_created=verdict.child_created)
+    version_text = ".".join(map(str, token)) if token else "unknown"
+    try:
+        payload = receipt_payload(verdict, codex_version=version_text, active=active_hash, target=target_hash)
+        write_receipt(destination, payload)
+    except ReceiptError:
+        print("receipt_write_failed", file=sys.stderr); return 1
+    _print(verdict)
+    return 0 if verdict.status == "NATIVE_OK" else 2 if verdict.status == "SKIPPED" else 1
 
 
 if __name__ == "__main__":

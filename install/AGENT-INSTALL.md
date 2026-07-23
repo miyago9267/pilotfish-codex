@@ -1,358 +1,148 @@
-# pilotfish-codex — Agent Install Runbook
+# Pilotfish-Codex native install runbook
 
-> This runbook is for a Codex agent installing pilotfish-codex on a user's
-> machine. Follow the steps in order, keep the approval gate, and preserve
-> unrelated Codex configuration.
->
-> A scripted alternative exists at [install.sh](./install.sh) /
-> [install.py](./install.py) for non-interactive installs. This runbook stays
-> the authoritative merge contract; the script implements the same rules and
-> aborts (exit 2) on any state that needs the human decisions described here.
+This runbook installs one native Codex Multi-Agent V2 target. It does not
+support an adapter fallback.
 
-## Contents
+## Preconditions
 
-- [What you are installing](#what-you-are-installing)
-- [Updating an existing install](#updating-an-existing-install)
-- [Step 1 — Preflight](#step-1--preflight)
-- [Step 2 — Present the plan](#step-2--present-the-plan)
-- [Step 3 — Apply](#step-3--apply)
-- [Step 4 — Verify and hand off](#step-4--verify-and-hand-off)
-- [Uninstall](#uninstall)
-
----
-
-## What you are installing
-
-pilotfish-codex ports Pilotfish v1.2's phase-aware orchestration and capability
-boundaries to seven native Codex roles. Remora 0.1.10 supplies the GPT-5.6
-model and reasoning-effort reference for those shared roles. The template
-recommends Sol for the main session while its reasoning effort stays under the
-user's control.
-
-| Target | Change |
-|---|---|
-| `~/.codex/config.toml` | Offer to set `model = "gpt-5.6-sol"`; preserve the legacy fallback; install the typed MultiAgentV2 adapter with bounded concurrency |
-| `~/.codex/agents/` | Install `scout`, `plan-verifier`, `security-reviewer`, `mech-executor`, `executor`, `verifier`, and `security-executor` |
-| Active global instruction file | Insert one `### Orchestration` block between `pilotfish-codex:begin` and `pilotfish-codex:end` markers |
-
-The source of truth is the repository's [templates](../templates) directory.
-When running inside a local clone, use those files directly. Otherwise fetch
-every template from the same Git ref as this runbook. Updates from v1.0.x also
-fetch the comparison-only retired Explore templates for
-[v1.0.0](./retired/v1.0.0/explore.toml) and
-[v1.0.1](./retired/v1.0.1/explore.toml) from that ref so legacy cleanup is
-verifiable. Never install either retired asset as an active role.
-
-> **Commit pinning:** If the install prompt names a tag or commit SHA, fetch
-> `VERSION`, `CHANGELOG.md`, and every template from that exact ref. Never mix a
-> pinned runbook with templates from `main`.
-
-> **Codex permission boundary:** Read-only roles set
-> `sandbox_mode = "read-only"`, but a live parent-session permission override
-> can supersede a custom agent default. Report the active parent permission
-> mode in the plan; do not describe the port as an absolute tool allowlist.
-
-## Updating an existing install
-
-Before the normal preflight, inspect both global instruction candidates and the
-current project root used by the legacy v1.0.x installer:
-
-```text
-~/.codex/AGENTS.override.md
-~/.codex/AGENTS.md
-<current-project-root>/AGENTS.md
-```
-
-Resolve the current project root with `git rev-parse --show-toplevel` when
-available; otherwise use the current working directory. The project-root file
-is a legacy migration source only. New policy is always installed in the active
-global instruction file.
-
-Search for `pilotfish-codex v` inside the marker block. A stamp such as
-`<!-- pilotfish-codex v1.1.0 -->` is the installed version; markers without a
-stamp mean a pre-v1.0.0 install. A complete marker pair in an inactive global
-or project-root file is migration work, not an automatic error. Unmatched
-markers or more than one pair in the same file still require stopping. Fetch
-`VERSION` and `CHANGELOG.md` from the same ref as the templates. Even when the
-installed version is current, inspect the installed role set for retired
-`explore.toml` or `Explore.toml` files before stopping. Stop only when the
-version, owned config, sole active policy block, seven active roles, and
-retired-role cleanup are all current. Otherwise report the drift, show any
-relevant changelog entries, and continue.
-
-An update is idempotent: identical agent files are skipped, the marked policy
-block is replaced in place, and only pilotfish-codex-owned config keys are
-considered. Show diffs for customized files before replacing them.
-
-## Step 1 — Preflight
-
-Gather the current state without writing:
-
-1. Run `codex --version`. Require Codex CLI 0.144.1 or newer for the base role
-   schema. The MultiAgentV2 adapter is verified on `0.144.4`; on another release
-   treat compatibility as unverified until the live smoke passes. Stop before
-   the write plan if the version is missing, older, or unparsable.
-2. Read `~/.codex/config.toml`. Record `model`,
-   `model_reasoning_effort`, `features.multi_agent`,
-   `features.multi_agent_v2.hide_spawn_agent_metadata`,
-   `features.multi_agent_v2.tool_namespace`,
-   `features.multi_agent_v2.max_concurrent_threads_per_session`,
-   `agents.max_threads`, and `agents.max_depth`. Preserve every unrelated key
-   and table. Reject a partial adapter before planning the write. Locate the
-   pristine config backup under both supported names:
-   legacy `config.toml.pilotfish-[0-9]*` and current
-   `config.toml.pilotfish-codex-*`. Prefer the earliest legacy backup, then the
-   earliest current backup, because a legacy backup predates any v1.0.x-owned
-   settings.
-3. Determine the active global instruction file. A non-empty
-   `~/.codex/AGENTS.override.md` wins; otherwise use `~/.codex/AGENTS.md`.
-   Resolve symlinks, deduplicate candidates by resolved path, then inspect it,
-   the inactive global candidate, and the current project root for marker pairs.
-   Record every stale source that must be backed up and cleaned. If the user
-   installed v1.0.x from another known project root, ask for that path rather
-   than scanning the whole home directory. Stop for unmatched markers or
-   multiple pairs within one file; do not stop merely because one valid stale
-   pair exists elsewhere.
-4. For a v1.0.x upgrade whose current root
-   `model_reasoning_effort = "medium"`, parse the pristine backup. If the root
-   key was absent there, classify the current value as confirmed legacy-owned
-   and offer an explicit remove-or-keep choice. If the backup contained the
-   key, preserve it as user-owned. If no pristine backup exists, report the
-   value as ambiguous and preserve it unless the user explicitly approves
-   removal.
-5. Inspect every `~/.codex/agents/*.toml` file and parse its `name` field.
-   Record filename collisions and name collisions for all seven installed
-   roles. If an existing file differs from the matching template, include its
-   diff in the plan. Treat both discovery aliases as retired roles because
-   `scout` owns broad and focused discovery in Codex. For a v1.0.x
-   `explore.toml` with `name = "explore"`, record whether it matches a released
-   v1.0.x template. Treat an uppercase `Explore.toml` as a pre-release v1.1
-   artifact; show its full content and require explicit deletion approval.
-
-The expected routing contract is:
-
-| Role | Model | Effort | Sandbox default |
-|---|---|---|---|
-| `scout` | `gpt-5.6-luna` | `low` | `read-only` |
-| `plan-verifier` | `gpt-5.6-sol` | `medium` | `read-only` |
-| `security-reviewer` | `gpt-5.6-sol` | `high` | `read-only` |
-| `mech-executor` | `gpt-5.6-luna` | `medium` | Parent session |
-| `executor` | `gpt-5.6-luna` | `max` | Parent session |
-| `verifier` | `gpt-5.6-sol` | `high` | `workspace-write` for test reproduction |
-| `security-executor` | `gpt-5.6-sol` | `max` | Parent session |
-
-## Step 2 — Present the plan
-
-Show a table with every target, exact action, and status: create, merge,
-replace, overwrite, or skip. Include the backup paths and every customized-file
-diff. Include each inactive instruction block that will be removed before the
-canonical block is installed globally. For a confirmed or ambiguous legacy
-effort pin, show the keep-or-remove choice. State that fresh installs never set
-main-session reasoning effort.
-
-Do not write until the user approves the presented plan. Approval may authorize
-overwriting colliding role files, but never infer that permission from the
-initial request alone.
-
-## Step 3 — Apply
-
-### Backup and directories
-
-Create the directories, preserve the authoritative pre-install config, and back
-up every instruction file that the approved migration will modify:
-
-```bash
-mkdir -p ~/.codex/backups ~/.codex/agents
-LEGACY_CONFIG_BACKUP=$(find ~/.codex/backups -maxdepth 1 -type f \
-  -name 'config.toml.pilotfish-[0-9]*' | sort | head -n 1)
-CURRENT_CONFIG_BACKUP=$(find ~/.codex/backups -maxdepth 1 -type f \
-  -name 'config.toml.pilotfish-codex-*' | sort | head -n 1)
-PILOTFISH_PRISTINE_CONFIG=${LEGACY_CONFIG_BACKUP:-$CURRENT_CONFIG_BACKUP}
-```
-
-If the selected backup is missing or invalid TOML, stop treating it as a
-baseline and report the problem. On a fresh install with an existing config and
-no prior backup, create
-`config.toml.pilotfish-codex-$(date +%Y%m%d-%H%M%S)` and record it as
-`PILOTFISH_PRISTINE_CONFIG`. On an upgrade with no pristine backup, never copy
-the already-modified config under either pristine prefix. Instead, preserve a
-rollback snapshot as
-`config.toml.before-pilotfish-codex-update-$(date +%Y%m%d-%H%M%S)` and report
-that the original pre-install state is unknown. If `config.toml` did not exist
-on a fresh install, record that fact rather than creating a fake baseline.
-
-Before changing policy, back up the resolved active global instruction file and
-every inactive instruction file whose stale marked block will be removed. Use a
-separate timestamped filename with a unique location label for each source so a
-global `AGENTS.md` and project-root `AGENTS.md` cannot overwrite one another's
-backup.
-
-### Merge config.toml
-
-Use [templates/config.snippet.toml](../templates/config.snippet.toml) as the
-canonical values. Perform a TOML-aware key merge; do not append root keys after
-an existing table and do not rewrite unrelated sections.
-
-The temporary adapter is one indivisible table:
+- Require exactly Codex `0.145.0`. Lower, higher, ambiguous, suffixed, or
+  nonzero `codex --version` output fails before writes.
+- The native configuration is exactly:
 
 ```toml
 [features.multi_agent_v2]
-hide_spawn_agent_metadata = false
-tool_namespace = "agents"
+enabled = true
 max_concurrent_threads_per_session = 4
 ```
 
-Do not set `features.multi_agent_v2.enabled`. Codex can select V2 for a live
-turn independently of local feature-list output, and locally enabling V2
-conflicts with the retained `agents.max_threads` fallback on the verified
-`0.144.4` release. Metadata exposure without the `agents` namespace is invalid
-because the default collaboration namespace uses a reserved server schema.
+- The total of four slots includes the root session and permits three children.
+  Do not emit `features.multi_agent`, `tool_namespace`,
+  `hide_spawn_agent_metadata`, `agents.max_threads`, or an `[agents]`
+  concurrency fallback.
+- The native manifest is exactly `executor`, `mech-executor`,
+  `plan-verifier`, `scout`, `security-executor`, `security-reviewer`, and
+  `verifier`. Role identity is each TOML `name`; filename equality is a local
+  Pilotfish validation rule.
 
-| Key | Merge rule |
-|---|---|
-| `model` | If absent, set `"gpt-5.6-sol"`. If different, apply the user's approved keep-or-replace choice. |
-| `model_reasoning_effort` | Never set it on a fresh install. For a v1.0.x upgrade, remove root value `"medium"` only when the pristine backup lacked that root key and the user explicitly approved the legacy-pin migration. Otherwise preserve it. |
-| `features.multi_agent` | If absent, set `true`. If `false`, change it only when the approved plan says so. |
-| `features.multi_agent_v2.hide_spawn_agent_metadata` | Set `false` together with the namespace key; never install it alone. |
-| `features.multi_agent_v2.tool_namespace` | Set `"agents"` together with metadata exposure. |
-| `features.multi_agent_v2.max_concurrent_threads_per_session` | If absent, set `4`. Accept an approved integer from 1 through 8; warn that 1 disables child delegation, 2–3 reduce concurrency, and 5–8 raise cost exposure. |
-| `agents.max_threads` | If absent, set `3`, allowing up to three leaf agent threads. If different, change it only when approved. |
-| `agents.max_depth` | If absent, set `1`. If different, change it only when approved; `1` enforces leaf-only delegation. |
+## Preflight and approval
 
-### Install agent files
+1. Run `codex --version` and stop unless its one standalone version token is
+   exactly `0.145.0`.
+2. Read the active `config.toml`, effective global policy (`AGENTS.override.md`
+   wins over `AGENTS.md`), and recursively discovered role files. Preserve all
+   unrelated content.
+3. Locate the sibling install state
+   `<CODEX_HOME>.pilotfish-install-state.json`. A `.pending` state or stale
+   committed fingerprint stops the installation for operator resolution.
+4. Present changed paths, timestamped backups, unowned legacy keys, customized
+   same-name roles, and extra roles. General home-write approval never approves
+   customized same-name role replacement.
+5. Obtain the separate home-write approval before backing up or writing a real
+   Codex home. Offline tests use only temporary homes.
 
-Write the seven files from `templates/agents/` to
-`~/.codex/agents/<same-name>.toml`.
+The installer uses a pending sidecar, stages all target files, writes backups
+before replacement, validates the post-write fingerprint, then atomically
+commits the mode-`0600` state sidecar. A pending state is never ownership proof.
+Repeated identical installs are idempotent.
 
-For released v1.0.x cleanup, use the retired templates fetched from this same
-Git ref. Verify them before comparison:
+A proven, committed per-key record may remove only these prior adapter-owned
+paths: `features.multi_agent`, `features.multi_agent_v2.tool_namespace`,
+`features.multi_agent_v2.hide_spawn_agent_metadata`, `agents.max_threads`, and
+`agents.max_concurrent_threads_per_session`. Matching bytes alone are not
+provenance. Unknown legacy input is preserved as `legacy_key_unowned` and blocks
+the native smoke.
 
-| Codex release | Historical commit | Retired asset SHA-256 |
-|---|---|---|
-| v1.0.0 | `305cbdb1d5ca2dda3a1d74bfa6473f46358a18d5` | `9bfdcbc3c032c084dcc0ee77e4fa74de3b30f0e1dfd1e87e180545052a85b59b` |
-| v1.0.1 | `139f9dc2eec32e5a5322f9e85cd2808c41f84a1a` | `d90b4735917afe9d5525c2f0429406c6bffa8d539d664b27760ed4680449a9a4` |
+The installer refuses scalar `false` or table `enabled = false`. Scalar `true`
+is converted to the native table. Inline and dotted V2 forms that cannot be
+rewritten without collateral edits abort. Existing V2 totals in `1..8` normalize
+to `4`; zero, values above eight, or malformed values abort before writes.
 
-Do not use the inherited repository tag named `v1.0.0`; it identifies the
-upstream Claude release, not the untagged Codex v1.0.x history.
-
-| Existing state | Action |
-|---|---|
-| No file and no name collision | Create from the template |
-| Matching file is byte-identical | Skip as current |
-| Matching file differs | Apply the approved overwrite choice |
-| Another filename declares the same `name` | Stop unless the approved plan explicitly resolves the collision |
-| Retired v1.0.x `explore.toml` | Delete it automatically only when it is byte-identical to either verified retired asset; otherwise show the diff and preserve it unless the approved plan explicitly allows deletion |
-| Retired pre-release `Explore.toml` | Show its full content and delete it only when the approved plan explicitly allows deletion |
-
-### Install the orchestration block
-
-Use
-[templates/agents-md.orchestration.md](../templates/agents-md.orchestration.md)
-as the canonical marked block.
-
-| Marker state in active global instruction file | Action |
-|---|---|
-| File missing or empty | Create it with the canonical block |
-| No marker pair | Append the block with one separating blank line |
-| Exactly one valid pair | Replace that pair and its contents only |
-| Valid pair in an inactive global or current project-root file | After its backup and explicit approval, remove exactly that stale block before installing the canonical block in the active global file |
-| Valid pairs in multiple candidate files | Treat the active global file as the destination and remove each stale marked block from inactive instruction files after backup and approval |
-| Multiple or unmatched pairs within one file | Stop and ask; never use a greedy replacement |
-
-Do not modify content outside the markers. If the user declines removal of a
-stale inactive or project-root block, stop the policy migration instead of
-creating competing policy blocks. When a stale block differs from the known
-v1.0.x policy, show that diff before requesting removal approval. Preserve an
-empty file after block removal rather than deleting a possibly versioned
-project file.
-
-## Step 4 — Verify and hand off
-
-Run structural and runtime-aware checks:
+## Install and offline validation
 
 ```bash
-codex --strict-config doctor --summary
-```
-
-`codex --strict-config doctor` validates `config.toml` only; it never loads
-`agents/*.toml`. Validate the installed roles with the dedicated static
-validator, which rejects unknown keys and out-of-enum `sandbox_mode`,
-`web_search`, and `model_reasoning_effort` values:
-
-```bash
+python3 install/install.py --codex-home "$ACTIVE_CODEX_HOME"
 python3 install/validate_agents.py \
-  --config ~/.codex/config.toml ~/.codex/agents
+  --config "$ACTIVE_CODEX_HOME/config.toml" "$ACTIVE_CODEX_HOME/agents"
 ```
 
-Then confirm the exact name, model, effort, and sandbox defaults match the
-routing table. Confirm `agents.max_threads = 3` and `agents.max_depth = 1`.
-Confirm the V2 concurrency is an integer from 1 through 8; the recommended
-value is 4 active threads including root. Re-run the static validator after any
-merge correction.
-Confirm the active global instruction file has exactly one marker pair and no
-inactive
-global or current project-root candidate retains one. Read back the version
-stamp. Confirm neither retired discovery filename remains when the approved
-outcome is the canonical seven-role roster. If the user chose to preserve
-either retired file, report the extra active role and do not claim an exact
-seven-role installation. Re-run the same preflight and confirm every policy
-action is now `skip`; this is the idempotence check.
+Do not add `[agents.<role>] config_file` declarations. Native recursive
+role discovery loads the seven TOMLs directly.
 
-After static checks pass, offer the explicit quota-spending E2E probe:
+The only retired role eligible for cleanup is lowercase `explore.toml`, after
+separate approval, when its bytes exactly match
+`install/retired/v1.0.0/explore.toml` or `install/retired/v1.0.1/explore.toml`
+and their recorded SHA-256 values. Customized `explore.toml`, uppercase
+`Explore.toml`, and every other extra role remain in place and block the staged
+manifest. This runbook does not authorize deleting residual adapter files.
+
+## Explicit staging and smoke
+
+The staging and quota gates are separate. Set absolute, distinct values for
+`REPO_ROOT`, `ACTIVE_CODEX_HOME`, `STAGED_CODEX_HOME`, and `SMOKE_DIR`.
+`SMOKE_DIR` must be outside `REPO_ROOT`, must not exist below a project root,
+and its ancestors must contain no project-local Codex configuration,
+`AGENTS.md`, `AGENTS.override.md`, or configured root marker.
+
+The staged destination must not exist. Materialize it first:
 
 ```bash
-python3 install/verify_dispatch.py --live --yes
+python3 "$REPO_ROOT/install/stage_smoke_home.py" \
+  --active-codex-home "$ACTIVE_CODEX_HOME" \
+  --staged-codex-home "$STAGED_CODEX_HOME"
 ```
 
-Require `ADAPTER_OK` before claiming that the affected-release transport routes
-a named child to a model different from the parent. `SKIPPED` means the live
-surface remains unverified; `FAILED` is a routing or evidence mismatch and must
-fail closed. Do not run the probe automatically or in CI.
+The helper derives a canonical config containing only
+`features.multi_agent_v2.enabled = true` and total concurrency `4`, then copies
+one effective policy, the seven-role manifest, and `auth.json`. All other
+active config keys remain untouched and are not selected for the smoke.
+Recognized
+`*.pilotfish-codex-*` rollback backups remain in the active home and are not
+staged input; they do not require pre-gate cleanup. It canonicalizes
+containment, rejects source symlink/TOCTOU changes, cleans temporary copies on
+failure, and publishes through an exclusive atomic no-replace operation. Any
+`stage_materialization_failed` stops before verifier or Codex launch and creates
+no receipt.
 
-The evidence-expansion commands are also manual and quota-spending:
+The active home is projected from explicit required paths; it is not scanned as
+an exact-layout input. Unknown root metadata such as `.DS_Store`,
+`.app-server-state-reconciled-v1`, `.codex-global-state.json`,
+`.codex-global-state.json.bak`, `..codex-global-state.json.tmp-*`, rollback
+backups, existing SQLite state, sessions, logs, temporary files, and future
+runtime metadata is not inspected, copied, or hashed. Required config, policy,
+role, and auth sources still reject symlinks, special or unreadable files,
+containment escapes, and mutation or TOCTOU. Before launch,
+`STAGED_CODEX_HOME` remains an exact minimal allowlist; Codex creates its own
+runtime state there only after preflight succeeds.
+
+After separate quota approval, run from the clean `SMOKE_DIR` in a fresh,
+authenticated `rust-v0.145.0` session:
 
 ```bash
-# Explicit role with a redacted JSON receipt.
-python3 install/verify_dispatch.py --live --yes \
-  --role scout --receipt ~/.codex/dispatch-receipts/scout.json
-
-# Sequential seven-role binding matrix.
-python3 install/verify_dispatch.py --live --yes \
-  --all-roles --matrix-yes --receipt-dir ~/.codex/dispatch-receipts
-
-# Offline task-class selection/abstention scoring.
-python3 install/evaluate_dispatch.py --decisions decisions.json
+cd "$SMOKE_DIR"
+LAUNCH_CAPTURE="$SMOKE_DIR/pilotfish-launch-capture.json"
+printf '{"CODEX_HOME":"%s","CODEX_SQLITE_HOME":"%s","codex_cwd":"%s"}\n' \
+  "$STAGED_CODEX_HOME" "$STAGED_CODEX_HOME" "$SMOKE_DIR" > "$LAUNCH_CAPTURE"
+CODEX_HOME="$STAGED_CODEX_HOME" CODEX_SQLITE_HOME="$STAGED_CODEX_HOME" \
+  python3 "$REPO_ROOT/install/verify_dispatch.py" --live --yes \
+  --role scout --codex-home "$STAGED_CODEX_HOME" \
+  --active-codex-home "$ACTIVE_CODEX_HOME" \
+  --repository-root "$REPO_ROOT" --codex-cwd "$SMOKE_DIR" \
+  --launch-capture "$LAUNCH_CAPTURE"
 ```
 
-Receipts are redacted evidence artifacts, not runtime guards. They may retain
-hashes, IDs, relative rollout references, model/effort, and verdict metadata;
-they must not retain prompts, responses, rollout contents, developer
-instructions, raw process output, or absolute home paths. The seven-role matrix
-proves explicit binding only. Native routing, pre-execution blocking, and hidden
-effective-role metadata remain upstream-dependent.
+The active verifier has no `--mode` or `--all-roles` route. Supplying either is
+`cli_input_invalid` before authentication, quota use, child creation, or
+receipt creation. It compares all active/staged config, role-manifest, and
+policy hashes before child creation and freezes the staged hash snapshot.
+The internal `codex exec` command uses `--skip-git-repo-check` because the
+verified clean smoke cwd is intentionally outside every repository.
 
-Tell the user to start a fresh Codex session. Agent definitions and global
-instructions are discovered at session start, so an already-running task does
-not prove the new install. Summarize changes, skips, approved overwrites,
-permission-mode caveats, and backup locations.
-
-## Uninstall
-
-Delete only installed agent files that still match the templates; show a diff
-before deleting customized files. Remove only the marked orchestration block.
-
-For `config.toml`, use the same `PILOTFISH_PRISTINE_CONFIG` selection as the
-installer: prefer the earliest valid `config.toml.pilotfish-[0-9]*` legacy
-backup, then the earliest valid `config.toml.pilotfish-codex-*` backup. Restore
-only the pilotfish-codex-owned keys from that baseline. If no pristine backup
-exists, use the recorded install state to remove only keys that did not exist
-before installation and preserve everything unrelated. Never restore the whole
-backup over a config that may have gained later user changes.
-
-Remove the complete `[features.multi_agent_v2]` adapter only when its keys were
-installed by Pilotfish and still match the template. Preserve customized or
-unrelated keys. For an upstream migration, retain the old table as rollback
-documentation until an adapter-free `--mode native` probe returns `NATIVE_OK`.
-On Codex `0.144.4`, native mode returns
-`SKIPPED: native_schema_introspection_unavailable` before quota or spawning;
-never bypass that gate with a metadata-exposure workaround.
+`NATIVE_OK` requires observed V2 selection, one typed `spawn_agent` call with
+exactly `message`, `agent_type`, `task_name`, and `fork_turns`, exact correlation
+to child activity, and child `turn_context.model` and `turn_context.effort`.
+The probe waits once for that child so `codex exec` does not abort it while
+evidence is being written.
+Receipts normalize the latter to `reasoning_effort`; raw runtime IDs are hashed.
+Namespace is not native evidence. `SKIPPED` is incomplete and `FAILED` blocks
+completion. Only after `NATIVE_OK` and Gate 4 approval may residual adapter
+artifacts or temporary receipts be deleted.

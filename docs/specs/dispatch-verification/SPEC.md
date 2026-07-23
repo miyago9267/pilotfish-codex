@@ -1,5 +1,8 @@
 # SPEC — Dispatch verification and enforcement
 
+> Historical adapter evidence. The active native contract is
+> `codex-native-multi-agent-migration`; adapter assertions are excluded from it.
+
 - Slug: `dispatch-verification`
 - Status: Reconciled
 - Owner: Miyago

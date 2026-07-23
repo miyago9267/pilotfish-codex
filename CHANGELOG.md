@@ -5,6 +5,18 @@ the policy block in `AGENTS.md` (`<!-- pilotfish-codex vX.Y.Z -->`).
 pilotfish-codex uses its own semantic versioning; upstream pilotfish versions
 are noted only as source references.
 
+## Unreleased — native Codex `rust-v0.145.0` migration
+
+- Replace the active adapter configuration with the exact native Multi-Agent V2
+  table and total concurrency of four.
+- Pin installer and live preflight support to exactly `0.145.0`; unsupported,
+  ambiguous, or suffixed versions fail closed without an adapter fallback.
+- Add transactional install-state provenance, exact seven-role validation,
+  native receipt hashes, and a staged-home materialization helper.
+- Replace active dispatch mode selection and role matrices with one native-only
+  verifier. Historical adapter evidence remains archival and excluded from the
+  native gate.
+
 ## v1.3.0 — 2026-07-20
 
 - Add redacted versioned dispatch receipts with atomic writes, path and hash

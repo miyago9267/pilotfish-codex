@@ -1,5 +1,8 @@
 # SPEC — Cost-safe named-role dispatch across MultiAgentV2
 
+> Historical adapter baseline. The active native contract is
+> `codex-native-multi-agent-migration`; this document is excluded from its gate.
+
 - Slug: `subagent-issue`
 - Status: Complete
 - Owner: Miyago
