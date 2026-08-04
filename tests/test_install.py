@@ -292,7 +292,14 @@ class NativeInstallTests(unittest.TestCase):
     def test_windows_install_uses_path_replacement_for_role_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "home"
-            self.assertEqual(self.run_install(home), 0)
+            with mock.patch.object(installer, "IS_WINDOWS", True):
+                with mock.patch.object(
+                    installer.os,
+                    "open",
+                    side_effect=AssertionError("Windows path must not open agents directory"),
+                ):
+                    self.assertIsNone(installer._open_agents_directory(home / "agents"))
+                self.assertEqual(self.run_install(home), 0)
             self.assertEqual(
                 {p.stem for p in (home / "agents").glob("*.toml")},
                 {"executor", "mech-executor", "plan-verifier", "scout", "security-executor", "security-reviewer", "verifier"},
