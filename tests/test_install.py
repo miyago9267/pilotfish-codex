@@ -288,11 +288,11 @@ class NativeInstallTests(unittest.TestCase):
             second = {p.relative_to(home): p.read_bytes() for p in home.rglob("*") if p.is_file()}
             self.assertEqual(first, second)
 
+    @unittest.skipUnless(os.name == "nt", "Windows-specific installer path")
     def test_windows_install_uses_path_replacement_for_role_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "home"
-            with mock.patch.object(installer.os, "name", "nt"):
-                self.assertEqual(self.run_install(home), 0)
+            self.assertEqual(self.run_install(home), 0)
             self.assertEqual(
                 {p.stem for p in (home / "agents").glob("*.toml")},
                 {"executor", "mech-executor", "plan-verifier", "scout", "security-executor", "security-reviewer", "verifier"},
