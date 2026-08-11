@@ -10,6 +10,12 @@ are noted only as source references.
 - Add the `pilotfish-decision-checkpoint-v1` contract with bounded options,
   conservative confirmation/rejection handling, and an explicit resume record.
 
+## v1.7.2
+
+- Align the release metadata, Plugin manifest, installer state, policy templates,
+  and regression fixtures at `1.7.2`; no behavior change is claimed by this
+  metadata release.
+
 ## v1.6.3
 
 - Add the Hybrid runtime: a minimal always-on root bootstrap plus the
