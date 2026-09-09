@@ -141,6 +141,21 @@ roles. Use `--replace-drifted-roles` only when all same-name drifted roles are
 intentionally being aligned. Role validation and post-install fingerprint
 verification remain enabled.
 
+The current policy and config remain the source of truth. If a committed state
+is stale because the current policy was edited, preview and explicitly opt in
+to reconciliation; the installer preserves the current bytes and publishes
+state-version-4 provenance:
+
+```bash
+bash install/install.sh --dry-run --reconcile-current --codex-home "$ACTIVE_CODEX_HOME"
+bash install/install.sh --reconcile-current --codex-home "$ACTIVE_CODEX_HOME"
+```
+
+For a dotfiles-managed policy symlink, also pass its contained canonical root:
+`--follow-policy-symlink --policy-root "$HOME/dotfile/config/ai"`. An installed
+Pilotfish Plugin newer than this checkout stops unless
+`--allow-plugin-downgrade` is explicitly selected.
+
 The installer adds the native Pilotfish role manifest and routing hook,
 integrates a short always-on bootstrap into the active root `AGENTS.md`, and
 installs the full `pilotfish-orchestration` workflow through Codex's supported

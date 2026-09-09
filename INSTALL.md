@@ -187,8 +187,14 @@ only its own temporary directory.
 
 If the active policy path is a symlink managed by the user's dotfiles, the
 installer stops by default. After verifying the target, explicitly authorize
-integration with `--follow-policy-symlink`; this preserves the symlink and
-writes only its regular-file target.
+integration with `--follow-policy-symlink --policy-root <contained-root>`; this
+preserves the symlink and writes only its regular-file target. A stale committed
+policy fingerprint likewise stops by default. Use
+`--reconcile-current` only after the dry-run confirms the current policy/config
+are the intended source of truth; the resulting state version 4 records the
+accepted preimages, target identity, previous sidecar digest, post-merge
+fingerprints, and rollback paths. Plugin installation may update only its own
+`plugins`/`marketplaces` entries; a foreign config mutation aborts.
 
 ## Validate and trust the hook
 

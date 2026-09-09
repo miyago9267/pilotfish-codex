@@ -232,6 +232,16 @@ class NativeConfigMergeTests(unittest.TestCase):
                     self.assertTrue(is_parseable_codex_output(output))
         self.assertFalse(is_compatible_codex_output("codex-cli 0.145.9"))
 
+    def test_plugin_version_precedence_respects_release_candidates(self) -> None:
+        self.assertGreater(
+            installer._plugin_version_key("1.8.0"),
+            installer._plugin_version_key("1.8.0-rc.1"),
+        )
+        self.assertGreater(
+            installer._plugin_version_key("1.8.0-rc.2"),
+            installer._plugin_version_key("1.8.0-rc.1"),
+        )
+
 
 class NativeInstallTests(unittest.TestCase):
     def test_codex_cli_resolves_windows_command_variants(self) -> None:
@@ -452,7 +462,14 @@ class NativeInstallTests(unittest.TestCase):
                 self.run_install(home)
             self.assertEqual(target.read_bytes(), original)
 
-            self.assertEqual(self.run_install(home, follow_policy_symlink=True), 0)
+            self.assertEqual(
+                self.run_install(
+                    home,
+                    follow_policy_symlink=True,
+                    policy_root=target.parent,
+                ),
+                0,
+            )
             installed = target.read_bytes()
             self.assertTrue(installed.startswith(original))
             self.assertIn(b"<!-- pilotfish-codex:begin -->", installed)
@@ -502,7 +519,7 @@ class NativeInstallTests(unittest.TestCase):
                         "installed": [{
                             "name": "pilotfish-codex",
                             "marketplaceName": "pilotfish-codex",
-                            "version": "1.7.1",
+                            "version": installer.PILOTFISH_PLUGIN_VERSION,
                             "enabled": True,
                             "marketplaceSource": {"source": str(ROOT / "plugin")},
                         }]
@@ -538,7 +555,7 @@ class NativeInstallTests(unittest.TestCase):
             home = Path(directory) / "home"
             unavailable = {
                 "name": "pilotfish-codex",
-                            "version": "1.7.1",
+                            "version": installer.PILOTFISH_PLUGIN_VERSION,
                 "status": "unavailable",
                 "source_sha256": installer._plugin_source_digest(ROOT / "plugin"),
             }
@@ -591,6 +608,373 @@ class NativeInstallTests(unittest.TestCase):
             config.write_text(changed)
             self.assertEqual(self.run_install(home), 0)
             self.assertIn('model = "gpt-5.6-sol"', config.read_text())
+
+    def test_reconcile_current_policy_preserves_bytes_and_publishes_v4_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            self.assertEqual(self.run_install(home), 0)
+            state_path = home.with_name(f"{home.name}.pilotfish-install-state.json")
+            previous_state = state_path.read_bytes()
+            policy = home / "AGENTS.md"
+            policy.write_bytes(policy.read_bytes() + b"\n# User-owned current rule\n")
+            preimage = policy.read_bytes()
+
+            self.assertEqual(
+                self.run_install(home, reconcile_current=True),
+                0,
+            )
+
+            installed = policy.read_bytes()
+            self.assertIn(b"# User-owned current rule", installed)
+            self.assertIn(b"<!-- pilotfish-codex:begin -->", installed)
+            state = json.loads(state_path.read_text())
+            self.assertEqual(state["state_version"], 4)
+            reconciliation = state["reconciliation"]
+            self.assertEqual(
+                reconciliation["previous_state_sha256"],
+                hashlib.sha256(previous_state).hexdigest(),
+            )
+            self.assertEqual(
+                reconciliation["accepted_preimages"]["AGENTS.md"]["sha256"],
+                hashlib.sha256(preimage).hexdigest(),
+            )
+            self.assertEqual(
+                reconciliation["post_merge_target_fingerprints"]["AGENTS.md"],
+                hashlib.sha256(installed).hexdigest(),
+            )
+            state_backup = home.parent / reconciliation["previous_state_backup"]["path"]
+            self.assertTrue(state_backup.is_file())
+            self.assertEqual(
+                hashlib.sha256(state_backup.read_bytes()).hexdigest(),
+                reconciliation["previous_state_backup"]["sha256"],
+            )
+            backup = state["rollback_backups"]["AGENTS.md"]
+            backup_path = home / backup["path"]
+            self.assertTrue(backup_path.is_file())
+            self.assertEqual(
+                hashlib.sha256(backup_path.read_bytes()).hexdigest(),
+                backup["sha256"],
+            )
+            self.assertEqual(set(state["rollback_backups"]), {"AGENTS.md", "config.toml"})
+
+    def test_reconcile_current_policy_requires_explicit_opt_in(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            self.assertEqual(self.run_install(home), 0)
+            policy = home / "AGENTS.md"
+            policy.write_bytes(policy.read_bytes() + b"\n# drift\n")
+            before = policy.read_bytes()
+
+            with self.assertRaisesRegex(InstallAbort, "committed install state is stale"):
+                self.run_install(home)
+            self.assertEqual(policy.read_bytes(), before)
+
+    def test_reconcile_current_rerun_is_idempotent_after_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            self.assertEqual(self.run_install(home), 0)
+            policy = home / "AGENTS.md"
+            policy.write_bytes(policy.read_bytes() + b"\n# current\n")
+            self.assertEqual(self.run_install(home, reconcile_current=True), 0)
+            state_path = home.with_name(f"{home.name}.pilotfish-install-state.json")
+            state_before = state_path.read_bytes()
+            files_before = {
+                path.relative_to(home): path.read_bytes()
+                for path in home.rglob("*")
+                if path.is_file()
+            }
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(
+                    install(
+                        source_root=ROOT,
+                        codex_home=home,
+                        dry_run=True,
+                        check_codex=False,
+                        reconcile_current=True,
+                    ),
+                    0,
+                )
+            self.assertIn("already up to date; nothing to change", output.getvalue())
+            self.assertEqual(state_path.read_bytes(), state_before)
+            self.assertEqual(
+                {
+                    path.relative_to(home): path.read_bytes()
+                    for path in home.rglob("*")
+                    if path.is_file()
+                },
+                files_before,
+            )
+
+    def test_symlink_policy_uses_contained_backup_and_records_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            canonical = root / "canonical"
+            home.mkdir()
+            canonical.mkdir()
+            target = canonical / "AGENTS.md"
+            target.write_bytes(b"# Current canonical policy\n")
+            os.symlink(target, home / "AGENTS.md")
+
+            self.assertEqual(
+                self.run_install(
+                    home,
+                    follow_policy_symlink=True,
+                    policy_root=canonical,
+                ),
+                0,
+            )
+            state = json.loads(
+                home.with_name(f"{home.name}.pilotfish-install-state.json").read_text()
+            )
+            self.assertEqual(state["state_version"], 4)
+            backup = state["rollback_backups"]["AGENTS.md"]
+            backup_path = home / backup["path"]
+            self.assertEqual(backup_path.parent, home)
+            self.assertTrue(backup_path.is_file())
+            self.assertTrue((home / "AGENTS.md").is_symlink())
+            identity = state["reconciliation"]["accepted_preimages"]["AGENTS.md"]
+            self.assertEqual(identity["target_path"], str(target.resolve()))
+            self.assertTrue(identity["symlink"])
+
+    def test_v4_hook_projection_upgrade_filters_hooks_backup_from_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            self.assertEqual(self.run_install(home), 0)
+            hooks_path = home / "hooks.json"
+            hooks = json.loads(hooks_path.read_text())
+            legacy = TRUSTED_PROJECTIONS["pilotfish-autoroute-v1"]
+            for event in ("UserPromptSubmit", "Stop"):
+                hooks["hooks"][event] = [legacy[event]]
+            hooks_path.write_text(json.dumps(hooks, indent=2) + "\n")
+            state_path = home.with_name(f"{home.name}.pilotfish-install-state.json")
+            state = json.loads(state_path.read_text())
+            state["hook_registration"] = {
+                "version": 1,
+                "projection_id": "pilotfish-autoroute-v1",
+                "projection_sha256": projection_digest("pilotfish-autoroute-v1"),
+            }
+            state_path.write_text(json.dumps(state, sort_keys=True) + "\n")
+            policy = home / "AGENTS.md"
+            policy.write_bytes(policy.read_bytes() + b"\n# current\n")
+
+            self.assertEqual(self.run_install(home, reconcile_current=True), 0)
+            committed = json.loads(state_path.read_text())
+            self.assertEqual(committed["state_version"], 4)
+            self.assertNotIn("hooks.json", committed["rollback_backups"])
+
+    def test_symlink_policy_root_escape_aborts_before_write(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            allowed = root / "allowed"
+            outside = root / "outside"
+            home.mkdir()
+            allowed.mkdir()
+            outside.mkdir()
+            target = outside / "AGENTS.md"
+            target.write_bytes(b"# Outside policy\n")
+            os.symlink(target, home / "AGENTS.md")
+
+            with self.assertRaisesRegex(InstallAbort, "policy target escapes configured root"):
+                self.run_install(
+                    home,
+                    follow_policy_symlink=True,
+                    policy_root=allowed,
+                )
+            self.assertEqual(target.read_bytes(), b"# Outside policy\n")
+            self.assertFalse((home / "agents").exists())
+
+    def test_symlink_policy_race_aborts_without_layering(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            canonical = root / "canonical"
+            home.mkdir()
+            canonical.mkdir()
+            target = canonical / "AGENTS.md"
+            target.write_bytes(b"# Current canonical policy\n")
+            os.symlink(target, home / "AGENTS.md")
+            self.assertEqual(
+                self.run_install(home, follow_policy_symlink=True, policy_root=canonical),
+                0,
+            )
+            target.write_bytes(target.read_bytes() + b"\n# current drift\n")
+            before = target.read_bytes()
+            original_assert = installer._assert_policy_identity
+            calls = 0
+
+            def mutate_after_check(identity: object, **_: object) -> None:
+                nonlocal calls
+                calls += 1
+                original_assert(identity)
+                if calls == 2:
+                    target.write_bytes(target.read_bytes() + b"\n# concurrent edit\n")
+
+            with mock.patch.object(
+                installer, "_assert_policy_identity", side_effect=mutate_after_check
+            ):
+                with self.assertRaisesRegex(InstallAbort, "policy target changed"):
+                    self.run_install(
+                        home,
+                        reconcile_current=True,
+                        follow_policy_symlink=True,
+                        policy_root=canonical,
+                    )
+            self.assertNotEqual(target.read_bytes(), before)
+            self.assertIn(b"# concurrent edit", target.read_bytes())
+
+    def test_backup_symlink_race_cannot_overwrite_external_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            home.mkdir()
+            (home / "AGENTS.md").write_bytes(b"# Current policy\n")
+            sentinel = root / "sentinel"
+            sentinel.write_bytes(b"keep me\n")
+            captured: dict[str, Path] = {}
+            original_planner = installer._planned_backup_path
+            original_is_symlink = Path.is_symlink
+            injected = False
+
+            def capture_backup(*args: object, **kwargs: object) -> Path:
+                backup = original_planner(*args, **kwargs)
+                if backup.name.startswith("AGENTS.md.pilotfish-codex-"):
+                    captured["path"] = backup
+                return backup
+
+            def race_is_symlink(path: Path) -> bool:
+                nonlocal injected
+                result = original_is_symlink(path)
+                backup = captured.get("path")
+                if backup is not None and path == backup and not injected:
+                    os.symlink(sentinel, backup)
+                    injected = True
+                    return False
+                return result
+
+            with mock.patch.object(
+                installer, "_planned_backup_path", side_effect=capture_backup
+            ), mock.patch.object(Path, "is_symlink", new=race_is_symlink):
+                with self.assertRaisesRegex(InstallAbort, "rollback backup"):
+                    self.run_install(home)
+            self.assertTrue(injected)
+            self.assertEqual(sentinel.read_bytes(), b"keep me\n")
+            self.assertTrue(captured["path"].is_symlink())
+
+    def test_v4_state_requires_rollback_evidence_for_accepted_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            self.assertEqual(self.run_install(home), 0)
+            policy = home / "AGENTS.md"
+            policy.write_bytes(policy.read_bytes() + b"\n# current\n")
+            self.assertEqual(self.run_install(home, reconcile_current=True), 0)
+            state_path = home.with_name(f"{home.name}.pilotfish-install-state.json")
+            state = json.loads(state_path.read_text())
+            self.assertEqual(state["state_version"], 4)
+            state["rollback_backups"] = {}
+            state_path.write_text(json.dumps(state, sort_keys=True) + "\n")
+            with self.assertRaisesRegex(InstallAbort, "rollback backup"):
+                self.run_install(home)
+
+    def test_v4_state_rejects_forged_preimage_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            self.assertEqual(self.run_install(home), 0)
+            policy = home / "AGENTS.md"
+            policy.write_bytes(policy.read_bytes() + b"\n# current\n")
+            self.assertEqual(self.run_install(home, reconcile_current=True), 0)
+            state_path = home.with_name(f"{home.name}.pilotfish-install-state.json")
+            state = json.loads(state_path.read_text())
+            preimage = state["reconciliation"]["accepted_preimages"]["AGENTS.md"]
+            preimage["target_path"] = str(home.parent / "outside-policy.md")
+            state_path.write_text(json.dumps(state, sort_keys=True) + "\n")
+            with self.assertRaisesRegex(InstallAbort, "preimage"):
+                self.run_install(home)
+
+    def test_reconcile_does_not_approve_same_name_role_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            self.assertEqual(self.run_install(home), 0)
+            policy = home / "AGENTS.md"
+            policy.write_bytes(policy.read_bytes() + b"\n# current policy\n")
+            role = home / "agents" / "mech-executor.toml"
+            role.write_bytes(role.read_bytes() + b"\n# customized\n")
+            before = role.read_bytes()
+
+            with self.assertRaisesRegex(InstallAbort, "installed_role_drift"):
+                self.run_install(home, reconcile_current=True)
+            self.assertEqual(role.read_bytes(), before)
+
+    def test_newer_installed_plugin_fails_closed_without_downgrade(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            plugin_list = json.dumps(
+                {
+                    "installed": [
+                        {
+                            "name": "pilotfish-codex",
+                            "marketplaceName": "pilotfish-codex",
+                            "version": "1.8.1",
+                            "enabled": True,
+                        }
+                    ]
+                }
+            )
+
+            def fake_run(args: list[str], **_: object) -> mock.Mock:
+                if args == ["codex", "--version"]:
+                    return mock.Mock(returncode=0, stdout="codex 0.147.0", stderr="")
+                if args == ["codex", "plugin", "list", "--json"]:
+                    return mock.Mock(returncode=0, stdout=plugin_list, stderr="")
+                raise AssertionError(args)
+
+            with mock.patch.object(installer.subprocess, "run", side_effect=fake_run):
+                with self.assertRaisesRegex(InstallAbort, "newer than source"):
+                    installer.install(
+                        source_root=ROOT,
+                        codex_home=home,
+                        dry_run=True,
+                        check_codex=True,
+                    )
+            self.assertFalse(home.exists())
+
+    def test_plugin_foreign_config_mutation_aborts_after_install(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            unavailable = {
+                "name": "pilotfish-codex",
+                "version": installer.PILOTFISH_PLUGIN_VERSION,
+                "status": "unavailable",
+                "source_sha256": installer._plugin_source_digest(ROOT / "plugin"),
+            }
+
+            def mutate_config(**_: object) -> dict[str, str]:
+                config = home / "config.toml"
+                config.write_bytes(config.read_bytes() + b"\n[foreign]\nkeep = true\n")
+                return unavailable
+
+            with mock.patch.object(
+                installer.subprocess,
+                "run",
+                return_value=mock.Mock(returncode=0, stdout="codex 0.147.0", stderr=""),
+            ), mock.patch.object(
+                installer, "_probe_plugin", return_value=unavailable
+            ), mock.patch.object(
+                installer, "_install_plugin", side_effect=mutate_config
+            ):
+                with self.assertRaisesRegex(InstallAbort, "foreign config mutation"):
+                    installer.install(
+                        source_root=ROOT,
+                        codex_home=home,
+                        dry_run=False,
+                        check_codex=True,
+                    )
+            self.assertIn(b"[foreign]", (home / "config.toml").read_bytes())
+            pending = home.with_name(f"{home.name}.pilotfish-install-state.json.pending")
+            self.assertTrue(pending.is_file())
+            self.assertEqual(json.loads(pending.read_text())["status"], "aborted")
 
     def test_owned_routing_drift_aborts_without_installer_writes(self) -> None:
         mutations = {

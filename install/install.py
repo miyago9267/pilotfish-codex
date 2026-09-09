@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import base64
+import copy
+from dataclasses import dataclass
 import hashlib
 import json
 import os
@@ -79,10 +81,26 @@ class InstallAbort(Exception):
     """The caller must resolve this state before any target write."""
 
 
+@dataclass(frozen=True)
+class PolicyTargetIdentity:
+    """Identity of the policy path and its resolved write target."""
+
+    link_path: Path
+    target_path: Path
+    policy_root: Path | None
+    symlink: bool
+    link_dev: int | None
+    link_ino: int | None
+    target_dev: int
+    target_ino: int
+    target_sha256: str
+
+
 MIN_COMPATIBLE_CODEX_VERSION = (0, 147, 0)
 PILOTFISH_PLUGIN_NAME = "pilotfish-codex"
-PILOTFISH_PLUGIN_VERSION = "1.7.1"
+PILOTFISH_PLUGIN_VERSION = "1.8.0-rc.1"
 RUNTIME_STATUSES = frozenset({"integrated", "integrated-plugin-unavailable"})
+RECONCILIATION_STATE_VERSION = 4
 
 
 def codex_version_token(output: str) -> str | None:
@@ -102,6 +120,40 @@ def parse_codex_version(output: str) -> tuple[int, int, int] | None:
     return tuple(int(part) for part in token.split("-", 1)[0].split("."))  # type: ignore[return-value]
 
 
+_PLUGIN_VERSION_RE = re.compile(
+    r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+    r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
+
+
+def _plugin_version_key(
+    value: str,
+) -> tuple[int, int, int, int, tuple[tuple[int, int, str], ...]] | None:
+    """Return a comparable SemVer precedence key for plugin versions."""
+    match = _PLUGIN_VERSION_RE.fullmatch(value)
+    if match is None:
+        return None
+    prerelease = match.group(4)
+    if prerelease is None:
+        return (int(match.group(1)), int(match.group(2)), int(match.group(3)), 1, ())
+    identifiers: list[tuple[int, int, str]] = []
+    for identifier in prerelease.split("."):
+        if identifier.isdigit():
+            if len(identifier) > 1 and identifier.startswith("0"):
+                return None
+            identifiers.append((0, int(identifier), ""))
+        else:
+            identifiers.append((1, 0, identifier))
+    return (
+        int(match.group(1)),
+        int(match.group(2)),
+        int(match.group(3)),
+        0,
+        tuple(identifiers),
+    )
+
+
 def is_parseable_codex_output(output: str) -> bool:
     """Validate one version token without imposing a release pin."""
     version = parse_codex_version(output)
@@ -116,6 +168,116 @@ def is_compatible_codex_output(output: str) -> bool:
 
 def _newline(text: str) -> str:
     return "\r\n" if "\r\n" in text else "\n"
+
+
+def _capture_policy_identity(
+    policy_path: Path,
+    *,
+    follow_policy_symlink: bool,
+    policy_root: Path | None,
+) -> PolicyTargetIdentity | None:
+    """Capture an exact policy target before planning any policy write."""
+    if not policy_path.exists() and not policy_path.is_symlink():
+        return None
+    if policy_path.is_symlink():
+        if not follow_policy_symlink:
+            raise InstallAbort(
+                "active policy path is a symlink; explicit policy integration is required"
+            )
+        if policy_root is None:
+            raise InstallAbort(
+                "policy-root is required when following an active policy symlink"
+            )
+        try:
+            root = policy_root.resolve(strict=True)
+        except OSError as exc:
+            raise InstallAbort("configured policy root is unavailable") from exc
+        if not root.is_dir():
+            raise InstallAbort("configured policy root is not a directory")
+        try:
+            target = policy_path.resolve(strict=True)
+        except OSError as exc:
+            raise InstallAbort("active policy symlink target is unavailable") from exc
+        try:
+            target.relative_to(root)
+        except ValueError as exc:
+            raise InstallAbort("policy target escapes configured root") from exc
+        link_stat = policy_path.lstat()
+        target_stat = target.stat()
+        if not stat.S_ISREG(target_stat.st_mode):
+            raise InstallAbort("active policy symlink target is not a regular file")
+        return PolicyTargetIdentity(
+            link_path=policy_path,
+            target_path=target,
+            policy_root=root,
+            symlink=True,
+            link_dev=link_stat.st_dev,
+            link_ino=link_stat.st_ino,
+            target_dev=target_stat.st_dev,
+            target_ino=target_stat.st_ino,
+            target_sha256=_sha256_bytes(target.read_bytes()),
+        )
+    if not policy_path.is_file():
+        raise InstallAbort("active policy path is not a regular file")
+    target = policy_path.resolve(strict=True)
+    target_stat = target.stat()
+    return PolicyTargetIdentity(
+        link_path=policy_path,
+        target_path=target,
+        policy_root=None,
+        symlink=False,
+        link_dev=None,
+        link_ino=None,
+        target_dev=target_stat.st_dev,
+        target_ino=target_stat.st_ino,
+        target_sha256=_sha256_bytes(target.read_bytes()),
+    )
+
+
+def _assert_policy_identity(
+    identity: PolicyTargetIdentity | None,
+    *,
+    expected_sha256: str | None = None,
+) -> None:
+    """Reject a policy link/target replacement or concurrent content change."""
+    if identity is None:
+        return
+    current = _capture_policy_identity(
+        identity.link_path,
+        follow_policy_symlink=identity.symlink,
+        policy_root=identity.policy_root,
+    )
+    if current is None or (
+        current.link_path != identity.link_path
+        or current.target_path != identity.target_path
+        or current.policy_root != identity.policy_root
+        or current.symlink != identity.symlink
+        or current.link_dev != identity.link_dev
+        or current.link_ino != identity.link_ino
+    ):
+        raise InstallAbort("policy target changed while install was planned")
+    if expected_sha256 is None:
+        if current.target_dev != identity.target_dev or current.target_ino != identity.target_ino:
+            raise InstallAbort("policy target changed while install was planned")
+        expected_sha256 = identity.target_sha256
+    if current.target_sha256 != expected_sha256:
+        raise InstallAbort("policy target changed while install was planned")
+
+
+def _policy_identity_record(identity: PolicyTargetIdentity | None) -> dict[str, object] | None:
+    if identity is None:
+        return None
+    return {
+        "link_path": str(identity.link_path),
+        "target_path": str(identity.target_path),
+        "policy_root": str(identity.policy_root) if identity.policy_root else "",
+        "symlink": identity.symlink,
+        "link_dev": identity.link_dev,
+        "link_ino": identity.link_ino,
+        "target_dev": identity.target_dev,
+        "target_ino": identity.target_ino,
+        "target_sha256": identity.target_sha256,
+    }
 
 
 def _table_span(lines: list[str], header: str) -> tuple[int, int] | None:
@@ -374,8 +536,8 @@ def _plugin_descriptor(source_root: Path, status: str) -> dict[str, str]:
     }
 
 
-def _plugin_is_installed(*, source_root: Path, codex_home: Path) -> bool:
-    plugin_root = source_root / "plugin"
+def _installed_plugin_rows(codex_home: Path) -> list[dict[str, object]] | None:
+    """Read Codex's installed-plugin inventory when the CLI exposes it."""
     environment = dict(os.environ)
     environment["CODEX_HOME"] = str(codex_home)
     try:
@@ -384,12 +546,58 @@ def _plugin_is_installed(*, source_root: Path, codex_home: Path) -> bool:
             capture_output=True, text=True, check=False, env=environment,
         )
     except OSError:
-        return False
+        return None
+    if discovered.returncode != 0:
+        return None
     try:
-        installed_plugins = json.loads(discovered.stdout).get("installed", [])
+        document = json.loads(discovered.stdout)
+        rows = document.get("installed", [])
     except (json.JSONDecodeError, AttributeError):
+        return None
+    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+        return None
+    return rows
+
+
+def _assert_plugin_not_newer(
+    *,
+    source_root: Path,
+    codex_home: Path,
+    allow_downgrade: bool,
+) -> None:
+    """Refuse replacing an installed newer plugin without explicit approval."""
+    if allow_downgrade or not (source_root / "plugin").is_dir():
+        return
+    rows = _installed_plugin_rows(codex_home)
+    if rows is None:
+        return
+    source_version = _plugin_version_key(PILOTFISH_PLUGIN_VERSION)
+    if source_version is None:
+        raise InstallAbort("source plugin version is malformed")
+    for row in rows:
+        if (
+            row.get("name") != PILOTFISH_PLUGIN_NAME
+            or row.get("marketplaceName") != PILOTFISH_PLUGIN_NAME
+        ):
+            continue
+        installed = row.get("version")
+        if not isinstance(installed, str):
+            raise InstallAbort("installed plugin version is malformed")
+        installed_version = _plugin_version_key(installed)
+        if installed_version is None:
+            raise InstallAbort("installed plugin version is malformed")
+        if installed_version > source_version:
+            raise InstallAbort(
+                "installed plugin is newer than source; explicit downgrade approval required"
+            )
+
+
+def _plugin_is_installed(*, source_root: Path, codex_home: Path) -> bool:
+    plugin_root = source_root / "plugin"
+    installed_plugins = _installed_plugin_rows(codex_home)
+    if installed_plugins is None:
         return False
-    return discovered.returncode == 0 and any(
+    return any(
         isinstance(item, dict)
         and item.get("name") == PILOTFISH_PLUGIN_NAME
         and item.get("marketplaceName") == PILOTFISH_PLUGIN_NAME
@@ -498,6 +706,18 @@ def _load_state(home: Path) -> dict | None:
     return state
 
 
+def _home_relative_path(home: Path, relative: str, *, label: str) -> Path:
+    """Resolve a manifest path while proving it remains inside Codex home."""
+    candidate = home / relative
+    if Path(relative).is_absolute() or ".." in Path(relative).parts:
+        raise InstallAbort(f"{label} escapes Codex home")
+    try:
+        candidate.resolve(strict=False).relative_to(home.resolve(strict=False))
+    except (OSError, ValueError) as exc:
+        raise InstallAbort(f"{label} escapes Codex home") from exc
+    return candidate
+
+
 def _required_state_targets(
     policy_path: Path,
     home: Path,
@@ -552,13 +772,40 @@ def _decode_config(payload: bytes, *, source: str) -> tuple[str, dict]:
     return text, parsed
 
 
+def _config_without_plugin_owned(data: dict) -> dict:
+    """Drop only Pilotfish's marketplace/plugin entries for mutation checks."""
+    result = copy.deepcopy(data)
+    for table_name in ("plugins", "marketplaces", "marketplace"):
+        table = result.get(table_name)
+        if isinstance(table, dict):
+            table.pop(PILOTFISH_PLUGIN_NAME, None)
+            table.pop(f"{PILOTFISH_PLUGIN_NAME}@{PILOTFISH_PLUGIN_NAME}", None)
+            if not table:
+                result.pop(table_name, None)
+        elif isinstance(table, list):
+            result[table_name] = [
+                entry for entry in table
+                if not (
+                    isinstance(entry, dict)
+                    and entry.get("name") in {
+                        PILOTFISH_PLUGIN_NAME,
+                        f"{PILOTFISH_PLUGIN_NAME}@{PILOTFISH_PLUGIN_NAME}",
+                    }
+                )
+            ]
+            if not result[table_name]:
+                result.pop(table_name, None)
+    return result
+
+
 def _validate_committed_state(
     state: dict,
     *,
     home: Path,
     policy_path: Path,
     config_snapshot: bytes | None,
-) -> tuple[frozenset[str], bool, str, bool, str | None]:
+    allow_policy_drift: bool = False,
+) -> tuple[frozenset[str], bool, str, bool, str | None, frozenset[str]]:
     """Validate sidecar provenance, including event-bound hook ownership."""
     if not isinstance(state, dict) or state.get("status") != "committed":
         raise InstallAbort("install state is not a committed transaction")
@@ -568,11 +815,15 @@ def _validate_committed_state(
     }
     legacy_with_plugin = legacy_allowed | {"plugin", "runtime_status", "rollback_backups"}
     v2_allowed = legacy_allowed | {"state_version", "hook_registration", "policy_ownership"}
+    v4_allowed = v2_allowed | {"reconciliation"}
     v2_pre_policy_ownership = (
         v2_allowed - {"policy_ownership"}
     )
+    sha_re = re.compile(r"^[0-9a-f]{64}$")
     is_v2 = "state_version" in state
-    if is_v2 and type(state["state_version"]) is int and state["state_version"] == 3:
+    if is_v2 and type(state["state_version"]) is int and state["state_version"] == 4:
+        allowed_top = v4_allowed | {"plugin", "runtime_status", "rollback_backups"}
+    elif is_v2 and type(state["state_version"]) is int and state["state_version"] == 3:
         allowed_top = v2_allowed | {"plugin", "runtime_status", "rollback_backups"}
     else:
         allowed_top = v2_allowed if is_v2 else legacy_allowed
@@ -584,10 +835,37 @@ def _validate_committed_state(
     if set(state) not in accepted_shapes:
         raise InstallAbort("install state has missing or unknown fields")
     if is_v2 and (
-        type(state["state_version"]) is not int or state["state_version"] not in (2, 3)
+        type(state["state_version"]) is not int or state["state_version"] not in (2, 3, 4)
     ):
         raise InstallAbort("install state version is malformed")
-    if is_v2 and state["state_version"] == 3:
+    if is_v2 and state["state_version"] == 4:
+        if set(state) != v4_allowed | {"plugin", "runtime_status", "rollback_backups"}:
+            raise InstallAbort("install state v4 fields are malformed")
+        plugin = state.get("plugin")
+        if not isinstance(plugin, dict) or set(plugin) != {
+            "name", "version", "status", "source_sha256"
+        } or not all(isinstance(value, str) for value in plugin.values()):
+            raise InstallAbort("install state plugin status is malformed")
+        if plugin["name"] != PILOTFISH_PLUGIN_NAME or plugin["status"] not in {
+            "installed", "unavailable"
+        } or (plugin["source_sha256"] and not re.fullmatch(r"[0-9a-f]{64}", plugin["source_sha256"])):
+            raise InstallAbort("install state plugin status is malformed")
+        if state["runtime_status"] not in RUNTIME_STATUSES:
+            raise InstallAbort("install state runtime status is malformed")
+        rollback_backups = state["rollback_backups"]
+        if not isinstance(rollback_backups, dict) or not all(
+            isinstance(key, str)
+            and isinstance(value, dict)
+            and set(value) == {"path", "sha256", "target_sha256"}
+            and isinstance(value["path"], str)
+            and isinstance(value["sha256"], str)
+            and isinstance(value["target_sha256"], str)
+            and not Path(value["path"]).is_absolute()
+            and ".pilotfish-codex-" in value["path"]
+            for key, value in rollback_backups.items()
+        ):
+            raise InstallAbort("install state rollback backup manifest is malformed")
+    elif is_v2 and state["state_version"] == 3:
         if set(state) != v2_allowed | {"plugin", "runtime_status", "rollback_backups"}:
             raise InstallAbort("install state v3 fields are malformed")
         plugin = state.get("plugin")
@@ -653,6 +931,8 @@ def _validate_committed_state(
     if not isinstance(targets, dict) or not isinstance(originals, dict):
         raise InstallAbort("install state target evidence is malformed")
     recorded = frozenset(targets)
+    policy_relative = policy_path.relative_to(home).as_posix()
+    accepted_drift: set[str] = set()
     required = (
         _required_v2_state_targets(policy_path, home)
         if is_v2
@@ -681,7 +961,6 @@ def _validate_committed_state(
     config_on_disk = config_path.read_bytes() if config_path.is_file() else None
     if config_on_disk != config_snapshot:
         raise InstallAbort("config.toml changed during state validation")
-    sha_re = re.compile(r"^[0-9a-f]{64}$")
     original_payloads: dict[str, bytes | None] = {}
     hook_script_fingerprint: str | None = None
     for relative in sorted(recorded):
@@ -712,6 +991,13 @@ def _validate_committed_state(
         if relative in {"config.toml", "hooks.json"}:
             continue
         if not target.is_file() or _sha256_bytes(target.read_bytes()) != fingerprint:
+            if allow_policy_drift and relative == policy_relative:
+                accepted_drift.add(relative)
+                continue
+            if allow_policy_drift and relative.startswith("agents/") and target.is_file():
+                # Leave same-name role drift for the explicit role approval gate
+                # in the planning pass; missing roles remain stale-state errors.
+                continue
             raise InstallAbort("committed install state is stale; operator resolution required")
         if relative == "hooks/pilotfish_autoroute_gate.py":
             hook_script_fingerprint = fingerprint
@@ -771,6 +1057,7 @@ def _validate_committed_state(
         expected_config = config_snapshot
 
     if _sha256_bytes(config_snapshot) != recorded_config_digest:
+        accepted_drift.add("config.toml")
         _, expected_parsed = _decode_config(
             expected_config, source="reconstructed committed"
         )
@@ -779,12 +1066,166 @@ def _validate_committed_state(
             expected_parsed, owned
         ):
             raise InstallAbort("committed config routing projection is stale")
+    if is_v2 and state["state_version"] == 4:
+        reconciliation = state.get("reconciliation")
+        if not isinstance(reconciliation, dict) or set(reconciliation) != {
+            "accepted_targets",
+            "previous_state_sha256",
+            "previous_state_backup",
+            "previous_target_fingerprints",
+            "accepted_preimages",
+            "post_merge_target_fingerprints",
+        }:
+            raise InstallAbort("install state reconciliation metadata is malformed")
+        accepted_targets = reconciliation["accepted_targets"]
+        if not isinstance(accepted_targets, list) or not all(
+            isinstance(value, str) for value in accepted_targets
+        ):
+            raise InstallAbort("install state reconciliation targets are malformed")
+        if (
+            accepted_targets != sorted(set(accepted_targets))
+            or not accepted_targets
+            or not set(accepted_targets) <= {policy_relative, "config.toml"}
+            or not set(accepted_targets) <= recorded
+        ):
+            raise InstallAbort("install state reconciliation targets are malformed")
+        previous_state_sha256 = reconciliation["previous_state_sha256"]
+        if not isinstance(previous_state_sha256, str) or (
+            previous_state_sha256 and not sha_re.fullmatch(previous_state_sha256)
+        ):
+            raise InstallAbort("install state previous state digest is malformed")
+        previous_state_backup = reconciliation["previous_state_backup"]
+        if previous_state_backup is not None:
+            if not isinstance(previous_state_backup, dict) or set(previous_state_backup) != {"path", "sha256"}:
+                raise InstallAbort("install state previous state backup is malformed")
+            backup_path = previous_state_backup["path"]
+            backup_sha256 = previous_state_backup["sha256"]
+            if (
+                not isinstance(backup_path, str)
+                or Path(backup_path).is_absolute()
+                or ".pilotfish-codex-" not in backup_path
+                or not isinstance(backup_sha256, str)
+                or not sha_re.fullmatch(backup_sha256)
+            ):
+                raise InstallAbort("install state previous state backup is malformed")
+            state_backup_path = _home_relative_path(
+                _state_path(home).parent,
+                backup_path,
+                label="install state backup",
+            )
+            if (
+                state_backup_path.is_symlink()
+                or not state_backup_path.is_file()
+                or _sha256_bytes(state_backup_path.read_bytes()) != backup_sha256
+            ):
+                raise InstallAbort("install state previous state backup is unavailable")
+        elif previous_state_sha256:
+            raise InstallAbort("install state previous state backup is missing")
+        previous_targets = reconciliation["previous_target_fingerprints"]
+        if not isinstance(previous_targets, dict) or set(previous_targets) - recorded or not all(
+            isinstance(value, str) and sha_re.fullmatch(value)
+            for value in previous_targets.values()
+        ):
+            raise InstallAbort("install state previous target fingerprints are malformed")
+        preimages = reconciliation["accepted_preimages"]
+        if not isinstance(preimages, dict) or set(preimages) != set(accepted_targets):
+            raise InstallAbort("install state accepted preimages are malformed")
+        identity_fields = {
+            "link_path", "target_path", "policy_root", "symlink", "link_dev",
+            "link_ino", "target_dev", "target_ino", "target_sha256",
+        }
+        for relative, preimage in preimages.items():
+            if not isinstance(preimage, dict) or set(preimage) != identity_fields | {"sha256"}:
+                raise InstallAbort("install state accepted preimage is malformed")
+            if not isinstance(preimage["sha256"], str) or not sha_re.fullmatch(preimage["sha256"]):
+                raise InstallAbort("install state accepted preimage is malformed")
+            if (
+                not all(isinstance(preimage[key], str) for key in ("link_path", "target_path", "policy_root", "target_sha256"))
+                or not isinstance(preimage["symlink"], bool)
+                or type(preimage["target_dev"]) is not int
+                or type(preimage["target_ino"]) is not int
+                or (preimage["link_dev"] is not None and type(preimage["link_dev"]) is not int)
+                or (preimage["link_ino"] is not None and type(preimage["link_ino"]) is not int)
+                or not sha_re.fullmatch(preimage["target_sha256"])
+                or preimage["sha256"] != preimage["target_sha256"]
+                or (
+                    preimage["symlink"]
+                    and (preimage["link_dev"] is None or preimage["link_ino"] is None)
+                )
+                or (
+                    not preimage["symlink"]
+                    and (preimage["link_dev"] is not None or preimage["link_ino"] is not None)
+                )
+            ):
+                raise InstallAbort("install state accepted preimage is malformed")
+            expected_link = policy_path if relative == policy_relative else home / relative
+            try:
+                expected_target = expected_link.resolve(strict=True)
+            except OSError as exc:
+                raise InstallAbort("install state accepted preimage is unavailable") from exc
+            if preimage["link_path"] != str(expected_link):
+                raise InstallAbort("install state accepted preimage path is malformed")
+            if preimage["symlink"]:
+                if relative != policy_relative or not expected_link.is_symlink():
+                    raise InstallAbort("install state accepted preimage symlink identity is malformed")
+                try:
+                    root = Path(preimage["policy_root"]).resolve(strict=True)
+                    expected_target.relative_to(root)
+                except (OSError, ValueError) as exc:
+                    raise InstallAbort("install state accepted preimage root is malformed") from exc
+                if (
+                    not root.is_dir()
+                    or preimage["policy_root"] != str(root)
+                    or preimage["target_path"] != str(expected_target)
+                ):
+                    raise InstallAbort("install state accepted preimage symlink identity is malformed")
+            elif (
+                expected_link.is_symlink()
+                or preimage["policy_root"]
+                or preimage["target_path"] != str(expected_target)
+                or preimage["link_dev"] is not None
+                or preimage["link_ino"] is not None
+            ):
+                raise InstallAbort("install state accepted preimage path is malformed")
+        post_merge = reconciliation["post_merge_target_fingerprints"]
+        if not isinstance(post_merge, dict) or set(post_merge) != recorded or any(
+            post_merge.get(key) != targets.get(key) for key in recorded
+        ):
+            raise InstallAbort("install state post-merge fingerprints are malformed")
+        rollback_backups = state["rollback_backups"]
+        required_backups = set(accepted_targets)
+        for relative in recorded:
+            evidence = originals[relative]
+            if evidence["present"] and evidence["sha256"] != targets[relative]:
+                required_backups.add(relative)
+        if set(rollback_backups) != required_backups:
+            raise InstallAbort("install state rollback backup manifest is incomplete")
+        if any(not originals[relative]["present"] for relative in accepted_targets):
+            raise InstallAbort("install state accepted target has no original evidence")
+        for relative, backup in rollback_backups.items():
+            if relative not in recorded:
+                raise InstallAbort("install state rollback backup target is unknown")
+            path = _home_relative_path(
+                home,
+                backup["path"],
+                label="install state rollback backup",
+            )
+            if (
+                path.is_symlink()
+                or not path.is_file()
+                or not sha_re.fullmatch(backup["sha256"])
+                or not sha_re.fullmatch(backup["target_sha256"])
+                or _sha256_bytes(path.read_bytes()) != backup["sha256"]
+                or backup["target_sha256"] != (originals[relative]["sha256"] or "")
+            ):
+                raise InstallAbort("install state rollback backup is unavailable")
     return (
         owned,
         migration_proven,
         hook_projection_id,
         not is_v2,
         hook_script_fingerprint,
+        frozenset(accepted_drift),
     )
 
 
@@ -930,6 +1371,66 @@ def _atomic_write(path: Path, payload: bytes, mode: int) -> None:
         temp.unlink(missing_ok=True)
 
 
+def _copy_backup_no_follow(
+    source: Path,
+    backup: Path,
+    expected_original: bytes,
+) -> None:
+    """Create a rollback copy without following a raced backup symlink."""
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    source_fd: int | None = None
+    backup_fd: int | None = None
+    try:
+        try:
+            source_fd = os.open(source, os.O_RDONLY | nofollow)
+            source_stat = os.fstat(source_fd)
+        except OSError as exc:
+            raise InstallAbort(f"rollback source changed: {source}") from exc
+        if not stat.S_ISREG(source_stat.st_mode):
+            raise InstallAbort(f"rollback source is not a regular file: {source}")
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(source_fd, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        payload = b"".join(chunks)
+        if payload != expected_original:
+            raise InstallAbort(f"rollback source changed while copying: {source}")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow
+        try:
+            backup_fd = os.open(backup, flags, 0o600)
+        except FileExistsError as exc:
+            raise InstallAbort(f"rollback backup path raced: {backup}") from exc
+        except OSError as exc:
+            raise InstallAbort(f"rollback backup is unavailable: {backup}") from exc
+        view = memoryview(payload)
+        while view:
+            written = os.write(backup_fd, view)
+            if written <= 0:
+                raise InstallAbort(f"rollback backup write failed: {backup}")
+            view = view[written:]
+        os.fsync(backup_fd)
+        created = os.fstat(backup_fd)
+        if not stat.S_ISREG(created.st_mode):
+            raise InstallAbort(f"rollback backup is not a regular file: {backup}")
+        try:
+            on_disk = backup.lstat()
+        except OSError as exc:
+            raise InstallAbort(f"rollback backup changed while copying: {backup}") from exc
+        if (
+            stat.S_ISLNK(on_disk.st_mode)
+            or on_disk.st_dev != created.st_dev
+            or on_disk.st_ino != created.st_ino
+        ):
+            raise InstallAbort(f"rollback backup changed while copying: {backup}")
+    finally:
+        if backup_fd is not None:
+            os.close(backup_fd)
+        if source_fd is not None:
+            os.close(source_fd)
+
+
 def _replace_staged(
     temp: Path,
     destination: Path,
@@ -966,13 +1467,76 @@ def _open_agents_directory(agents_root: Path) -> int | None:
     return os.open(agents_root, flags)
 
 
+def _write_destination(path: Path, policy_identity: PolicyTargetIdentity | None) -> Path:
+    if (
+        policy_identity is not None
+        and policy_identity.symlink
+        and path == policy_identity.link_path
+    ):
+        return policy_identity.target_path
+    return _destination(path)
+
+
+def _planned_backup_path(
+    path: Path,
+    *,
+    codex_home: Path,
+    policy_identity: PolicyTargetIdentity | None,
+    stamp: str,
+) -> Path:
+    destination = _write_destination(path, policy_identity)
+    if policy_identity is not None and path == policy_identity.link_path and policy_identity.symlink:
+        backup = codex_home / f"{path.name}.pilotfish-codex-{stamp}"
+    else:
+        backup = destination.with_name(f"{destination.name}.pilotfish-codex-{stamp}")
+    try:
+        backup.relative_to(codex_home)
+    except ValueError as exc:
+        raise InstallAbort("rollback backup escapes Codex home") from exc
+    return backup
+
+
+def _planned_backup_paths(
+    writes: list[tuple[Path, bytes, int, bytes | None]],
+    *,
+    codex_home: Path,
+    policy_identity: PolicyTargetIdentity | None,
+    stamp: str,
+) -> dict[Path, Path]:
+    result: dict[Path, Path] = {}
+    for path, _, _, original in writes:
+        if original is None:
+            continue
+        result[path] = _planned_backup_path(
+            path,
+            codex_home=codex_home,
+            policy_identity=policy_identity,
+            stamp=stamp,
+        )
+    return result
+
+
 def _commit(writes: list[tuple[Path, bytes, int, bytes | None]], stamp: str,
             *, agents_root: Path, hooks_root: Path, codex_home: Path,
-            policy_path: Path) -> list[tuple[Path, bytes | None, bytes, int]]:
+            policy_path: Path,
+            policy_identity: PolicyTargetIdentity | None = None,
+            backup_paths: dict[Path, Path] | None = None,
+            unbacked_paths: frozenset[Path] = frozenset(),
+            ) -> list[tuple[Path, bytes | None, bytes, int]]:
     _assert_active_instruction_file(codex_home, policy_path)
     _assert_hook_targets(codex_home)
-    staged: list[tuple[Path, Path, bytes | None, bool, bool]] = []
-    expected_post = {_destination(path): payload for path, payload, _, _ in writes}
+    _assert_policy_identity(policy_identity)
+    backup_paths = backup_paths or _planned_backup_paths(
+        writes,
+        codex_home=codex_home,
+        policy_identity=policy_identity,
+        stamp=stamp,
+    )
+    staged: list[tuple[Path, Path, Path, bytes | None, bool, bool]] = []
+    expected_post = {
+        _write_destination(path, policy_identity): payload
+        for path, payload, _, _ in writes
+    }
     agents_root.mkdir(parents=True, exist_ok=True)
     _assert_agents_root(agents_root, codex_home)
     hooks_root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -990,7 +1554,7 @@ def _commit(writes: list[tuple[Path, bytes, int, bytes | None]], stamp: str,
                 _assert_agents_root(agents_root, codex_home)
             if is_hook:
                 _assert_hook_targets(codex_home)
-            dest = _destination(path)
+            dest = _write_destination(path, policy_identity)
             dest.parent.mkdir(parents=True, exist_ok=True)
             temp_dir = codex_home if is_role else dest.parent
             fd, name = tempfile.mkstemp(prefix=f".{dest.name}.pilotfish-", dir=temp_dir)
@@ -998,18 +1562,27 @@ def _commit(writes: list[tuple[Path, bytes, int, bytes | None]], stamp: str,
             with os.fdopen(fd, "wb") as handle:
                 handle.write(payload); handle.flush(); os.fsync(handle.fileno())
             os.chmod(temp, stat.S_IMODE(dest.stat().st_mode) if dest.is_file() else mode)
-            staged.append((dest, temp, original, is_role, is_hook))
-        for dest, _, original, _, _ in staged:
+            staged.append((path, dest, temp, original, is_role, is_hook))
+        _assert_policy_identity(policy_identity)
+        for _, dest, _, original, _, _ in staged:
             actual = dest.read_bytes() if dest.is_file() else None
             if actual != original:
                 raise InstallAbort(f"{dest} changed while install was planned")
         _assert_active_instruction_file(codex_home, policy_path)
-        for dest, _, original, _, _ in staged:
+        _assert_policy_identity(policy_identity)
+        for source_path, dest, _, original, _, _ in staged:
             if original is not None:
-                shutil.copy2(dest, dest.with_name(f"{dest.name}.pilotfish-codex-{stamp}"))
+                backup = backup_paths.get(source_path)
+                if backup is None:
+                    if source_path in unbacked_paths:
+                        continue
+                    raise InstallAbort("rollback backup path is missing")
+                if backup.exists() or backup.is_symlink():
+                    raise InstallAbort(f"rollback backup already exists: {backup}")
+                _copy_backup_no_follow(dest, backup, original)
         applied: list[tuple[Path, bytes | None, bytes, int]] = []
         try:
-            for dest, temp, original, is_role, is_hook in staged:
+            for _, dest, temp, original, is_role, is_hook in staged:
                 payload = expected_post[dest]
                 mode = stat.S_IMODE(dest.stat().st_mode) if dest.is_file() else 0o600
                 if is_role:
@@ -1024,10 +1597,30 @@ def _commit(writes: list[tuple[Path, bytes, int, bytes | None]], stamp: str,
                     role_directory_fd=agents_fd if is_role else None,
                 )
                 applied.append((dest, original, payload, mode))
+                if policy_identity is not None and dest == _write_destination(
+                    policy_identity.link_path,
+                    policy_identity,
+                ):
+                    _assert_policy_identity(
+                        policy_identity,
+                        expected_sha256=_sha256_bytes(payload),
+                    )
             for destination, expected in expected_post.items():
                 if not destination.is_file() or destination.read_bytes() != expected:
                     raise InstallAbort("post-write target fingerprint mismatch")
             _assert_active_instruction_file(codex_home, policy_path)
+            policy_destination = (
+                _write_destination(policy_identity.link_path, policy_identity)
+                if policy_identity is not None
+                else None
+            )
+            if policy_destination is not None and policy_destination in expected_post:
+                _assert_policy_identity(
+                    policy_identity,
+                    expected_sha256=_sha256_bytes(expected_post[policy_destination]),
+                )
+            else:
+                _assert_policy_identity(policy_identity)
         except (OSError, InstallAbort):
             for dest, original, payload, mode in reversed(applied):
                 current = dest.read_bytes() if dest.is_file() else None
@@ -1042,7 +1635,7 @@ def _commit(writes: list[tuple[Path, bytes, int, bytes | None]], stamp: str,
     finally:
         if agents_fd is not None:
             os.close(agents_fd)
-        for _, temp, _, _, _ in staged:
+        for _, _, temp, _, _, _ in staged:
             temp.unlink(missing_ok=True)
 
 
@@ -1055,6 +1648,9 @@ def install(
     replace_drifted_roles: bool = False,
     replace_drifted_role: tuple[str, ...] = (),
     follow_policy_symlink: bool = False,
+    policy_root: Path | None = None,
+    reconcile_current: bool = False,
+    allow_plugin_downgrade: bool = False,
 ) -> int:
     unknown_drift_roles = set(replace_drifted_role) - set(ROLES)
     if unknown_drift_roles:
@@ -1075,6 +1671,11 @@ def install(
         if version < MIN_COMPATIBLE_CODEX_VERSION:
             minimum = ".".join(str(part) for part in MIN_COMPATIBLE_CODEX_VERSION)
             print(f"error: version_below_minimum (requires >= {minimum})", file=sys.stderr); return 2
+        _assert_plugin_not_newer(
+            source_root=source_root,
+            codex_home=codex_home,
+            allow_downgrade=allow_plugin_downgrade,
+        )
     config_path = codex_home / "config.toml"
     config_snapshot = config_path.read_bytes() if config_path.is_file() else None
     config_text, parsed_config = _decode_config(
@@ -1082,23 +1683,21 @@ def install(
     )
     policy_template = (source_root / "templates" / "agents-md.bootstrap.md").read_text(encoding="utf-8")
     user_policy_path = active_instruction_file(codex_home)
-    if user_policy_path.is_symlink():
-        if not follow_policy_symlink:
-            raise InstallAbort(
-                "active policy path is a symlink; explicit policy integration is required"
-            )
-        try:
-            policy_target = user_policy_path.resolve(strict=True)
-        except OSError as exc:
-            raise InstallAbort("active policy symlink target is unavailable") from exc
-        if not policy_target.is_file():
-            raise InstallAbort("active policy symlink target is not a regular file")
-    if user_policy_path.is_file() and user_policy_path.stat().st_nlink > 1:
+    policy_identity = _capture_policy_identity(
+        user_policy_path,
+        follow_policy_symlink=follow_policy_symlink,
+        policy_root=policy_root,
+    )
+    if not user_policy_path.is_symlink() and user_policy_path.is_file() and user_policy_path.stat().st_nlink > 1:
         raise InstallAbort(
             "active policy path is hard-linked; explicit policy integration is required"
         )
     policy_path = user_policy_path
-    policy_bytes = policy_path.read_bytes() if policy_path.is_file() else None
+    policy_bytes = (
+        policy_identity.target_path.read_bytes()
+        if policy_identity is not None
+        else None
+    )
     policy_text, policy_newline = _decode_instruction_bytes(policy_bytes)
     state = _load_state(codex_home)
     owned = frozenset()
@@ -1106,8 +1705,11 @@ def install(
     owned_hook_projection: str | None = None
     legacy_state = False
     proven_hook_script_fingerprint: str | None = None
+    accepted_drift: frozenset[str] = frozenset()
     features = parsed_config.get("features", {}) if isinstance(parsed_config, dict) else {}
     legacy_v2 = isinstance(features, dict) and "multi_agent_v2" in features
+    if reconcile_current and state is None:
+        raise InstallAbort("reconcile-current requires committed install state")
     if state is not None:
         (
             owned,
@@ -1115,11 +1717,13 @@ def install(
             owned_hook_projection,
             legacy_state,
             proven_hook_script_fingerprint,
+            accepted_drift,
         ) = _validate_committed_state(
             state,
             home=codex_home,
             policy_path=policy_path,
             config_snapshot=config_snapshot,
+            allow_policy_drift=reconcile_current,
         )
     elif legacy_v2:
         # Let the config validator classify malformed/disabled/extra legacy
@@ -1134,7 +1738,7 @@ def install(
     new_policy, policy_action = merge_instruction_text(policy_text, policy_template)
     policy_payload = _encode_instruction_text(new_policy, policy_newline)
     policy_ownership = _policy_ownership(codex_home, user_policy_path, policy_path)
-    if follow_policy_symlink:
+    if policy_identity is not None and policy_identity.symlink:
         policy_ownership["user_policy"]["status"] = "integrated-symlink-target"
     policy_ownership["pilotfish_policy"]["sha256"] = _sha256_bytes(policy_payload)
     plugin = _probe_plugin(
@@ -1287,9 +1891,67 @@ def install(
         ]
         for path in state_inventory
     }
+    policy_relative = policy_path.relative_to(codex_home).as_posix()
+    state_path = _state_path(codex_home)
+    state_original = state_path.read_bytes() if state_path.is_file() else None
+    previous_reconciliation = (
+        state.get("reconciliation")
+        if state is not None and state.get("state_version") == RECONCILIATION_STATE_VERSION
+        else None
+    )
+    previous_accepted_targets = (
+        set(previous_reconciliation.get("accepted_targets", []))
+        if isinstance(previous_reconciliation, dict)
+        else set()
+    )
+    state_version = (
+        RECONCILIATION_STATE_VERSION
+        if reconcile_current
+        or (policy_identity is not None and policy_identity.symlink)
+        or (state is not None and state.get("state_version") == RECONCILIATION_STATE_VERSION)
+        else 3
+    )
+    accepted_targets: set[str] = set()
+    if state_version == RECONCILIATION_STATE_VERSION:
+        accepted_targets.update(previous_accepted_targets)
+        if reconcile_current:
+            accepted_targets.update({policy_relative, "config.toml"})
+        if policy_identity is not None and policy_identity.symlink:
+            accepted_targets.add(policy_relative)
+        if not accepted_targets <= set(expected_state_inventory):
+            raise InstallAbort("reconciliation target is not part of the state inventory")
+    accepted_preimages: dict[str, dict[str, object]] = {}
+    for relative in sorted(accepted_targets):
+        identity = (
+            policy_identity
+            if relative == policy_relative
+            else _capture_policy_identity(
+                config_path,
+                follow_policy_symlink=False,
+                policy_root=None,
+            )
+        )
+        payload = policy_bytes if relative == policy_relative else config_snapshot
+        if identity is None or payload is None:
+            raise InstallAbort(f"reconciliation preimage is unavailable: {relative}")
+        identity_record = _policy_identity_record(identity)
+        if identity_record is None:
+            raise InstallAbort(f"reconciliation identity is unavailable: {relative}")
+        accepted_preimages[relative] = {
+            "sha256": _sha256_bytes(payload),
+            **identity_record,
+        }
+    reconciliation_previous_targets = (
+        dict(state.get("target_fingerprints", {})) if state is not None else {}
+    )
     state_needs_publication = state is None or legacy_state or (
         owned_hook_projection != desired_hook_projection
-    ) or state is None or state.get("plugin") != plugin or state.get("runtime_status") != runtime_status or plugin_install_needed
+    ) or state is None or state.get("plugin") != plugin or state.get("runtime_status") != runtime_status or plugin_install_needed or (
+        state is not None and state.get("state_version", 3) != state_version
+    ) or (
+        state is not None
+        and state.get("target_fingerprints") != expected_state_inventory
+    )
     if dry_run:
         for warning in windows_warnings:
             print(f"warning: {warning}")
@@ -1300,23 +1962,107 @@ def install(
             return 0
         for path, _, _, _ in writes:
             print(f"would change primary: {path.relative_to(codex_home).as_posix()}")
-        state_path = _state_path(codex_home)
         print(f"allowed transaction artifact: {state_path.name}.pending")
         print(f"allowed transaction artifact: {state_path.name}")
         for path, _, _, original in writes:
-            if original is not None:
-                relative = path.relative_to(codex_home).as_posix()
-                print(f"allowed transaction artifact: {relative}.pilotfish-codex-<timestamp>")
+            if (
+                original is not None
+                and not (state_version == RECONCILIATION_STATE_VERSION and path == hooks_registration)
+            ):
+                backup = _planned_backup_path(
+                    path,
+                    codex_home=codex_home,
+                    policy_identity=policy_identity,
+                    stamp="<timestamp>",
+                )
+                print(
+                    f"allowed transaction artifact: "
+                    f"{backup.relative_to(codex_home).as_posix()}"
+                )
+        if state_version == RECONCILIATION_STATE_VERSION:
+            planned_sources = {path for path, _, _, _ in writes}
+            for relative in sorted(accepted_targets):
+                source = policy_path if relative == policy_relative else config_path
+                if source in planned_sources:
+                    continue
+                backup = _planned_backup_path(
+                    source,
+                    codex_home=codex_home,
+                    policy_identity=policy_identity,
+                    stamp="<timestamp>",
+                )
+                print(
+                    f"allowed transaction artifact: "
+                    f"{backup.relative_to(codex_home).as_posix()}"
+                )
+        if state_version == RECONCILIATION_STATE_VERSION and state_original is not None:
+            print(f"allowed transaction artifact: {state_path.name}.pilotfish-codex-<timestamp>")
         return 0
     if writes or state_needs_publication:
         stamp = _stamp()
-        rollback_backups = {
-            path.relative_to(codex_home).as_posix():
-            f"{path.name}.pilotfish-codex-{stamp}"
-            for path, _, _, original in writes
-            if original is not None
+        backup_paths = _planned_backup_paths(
+            writes,
+            codex_home=codex_home,
+            policy_identity=policy_identity,
+            stamp=stamp,
+        )
+        unbacked_paths = (
+            frozenset({hooks_registration})
+            if state_version == RECONCILIATION_STATE_VERSION
+            else frozenset()
+        )
+        backup_paths = {
+            path: backup
+            for path, backup in backup_paths.items()
+            if path not in unbacked_paths
         }
-        pending = _state_path(codex_home).with_suffix(".json.pending")
+        backup_originals = {
+            path: original
+            for path, _, _, original in writes
+            if original is not None and path not in unbacked_paths
+        }
+        if state_version == RECONCILIATION_STATE_VERSION:
+            for relative in sorted(accepted_targets):
+                source = policy_path if relative == policy_relative else config_path
+                if source in backup_paths:
+                    continue
+                encoded = pre_targets[relative]["bytes_b64"]
+                if not isinstance(encoded, str):
+                    raise InstallAbort(f"reconciliation backup source is unavailable: {relative}")
+                original = base64.b64decode(encoded, validate=True)
+                backup_paths[source] = _planned_backup_path(
+                    source,
+                    codex_home=codex_home,
+                    policy_identity=policy_identity,
+                    stamp=stamp,
+                )
+                backup_originals[source] = original
+        if state_version == RECONCILIATION_STATE_VERSION:
+            rollback_backups = {
+                source.relative_to(codex_home).as_posix(): {
+                    "path": backup.relative_to(codex_home).as_posix(),
+                    "sha256": _sha256_bytes(backup_originals[source]),
+                    "target_sha256": _sha256_bytes(backup_originals[source]),
+                }
+                for source, backup in backup_paths.items()
+            }
+        else:
+            rollback_backups = {
+                path.relative_to(codex_home).as_posix(): backup_paths[path].name
+                for path, original in backup_originals.items()
+                if path in {write[0] for write in writes}
+            }
+        pending = state_path.with_suffix(".json.pending")
+        previous_state_backup = None
+        state_backup_path: Path | None = None
+        if state_version == RECONCILIATION_STATE_VERSION and state_original is not None:
+            state_backup_path = state_path.parent / f"{state_path.name}.pilotfish-codex-{stamp}"
+            if state_backup_path.exists() or state_backup_path.is_symlink():
+                raise InstallAbort(f"previous install state backup already exists: {state_backup_path}")
+            previous_state_backup = {
+                "path": state_backup_path.name,
+                "sha256": _sha256_bytes(state_original),
+            }
         pending_record = {
             "status": "pending",
             "original_targets": state_pre_targets,
@@ -1333,14 +2079,37 @@ def install(
                 for path in owned
             },
         }
+        if state_version == RECONCILIATION_STATE_VERSION:
+            pending_record["reconciliation"] = {
+                "accepted_targets": sorted(accepted_targets),
+                "previous_state_sha256": _sha256_bytes(state_original) if state_original else "",
+                "previous_state_backup": previous_state_backup,
+                "previous_target_fingerprints": reconciliation_previous_targets,
+                "accepted_preimages": accepted_preimages,
+                "post_merge_target_fingerprints": expected_state_inventory,
+            }
         pending_payload = json.dumps(pending_record, sort_keys=True).encode() + b"\n"
         _atomic_write(pending, pending_payload, 0o600)
-        state_path = _state_path(codex_home)
-        state_original = state_path.read_bytes() if state_path.is_file() else None
         applied: list[tuple[Path, bytes | None, bytes, int]] = []
         state_payload: bytes | None = None
         plugin_activated = False
         try:
+            if state_backup_path is not None:
+                _atomic_write(state_backup_path, state_original or b"", 0o600)
+            for source, backup in backup_paths.items():
+                if source in {write[0] for write in writes}:
+                    continue
+                _assert_policy_identity(policy_identity)
+                destination = _write_destination(source, policy_identity)
+                expected_original = backup_originals[source]
+                if not destination.is_file() or destination.read_bytes() != expected_original:
+                    raise InstallAbort(
+                        f"reconciliation target changed while install was planned: "
+                        f"{source.relative_to(codex_home).as_posix()}"
+                    )
+                if backup.exists() or backup.is_symlink():
+                    raise InstallAbort(f"rollback backup already exists: {backup}")
+                _copy_backup_no_follow(destination, backup, expected_original)
             applied = _commit(
                 writes,
                 stamp,
@@ -1348,18 +2117,38 @@ def install(
                 hooks_root=hooks_root,
                 codex_home=codex_home,
                 policy_path=user_policy_path,
+                policy_identity=policy_identity,
+                backup_paths=backup_paths,
+                unbacked_paths=unbacked_paths,
             )
             _assert_active_instruction_file(codex_home, user_policy_path)
+            if policy_identity is not None:
+                _assert_policy_identity(
+                    policy_identity,
+                    expected_sha256=expected_inventory[policy_relative],
+                )
             for path in inventory:
                 relative = path.relative_to(codex_home).as_posix()
                 if not path.is_file() or _sha256_bytes(path.read_bytes()) != expected_inventory[relative]:
                     raise InstallAbort("post-write transaction fingerprint mismatch")
             _assert_active_instruction_file(codex_home, user_policy_path)
+            if policy_identity is not None:
+                _assert_policy_identity(
+                    policy_identity,
+                    expected_sha256=expected_inventory[policy_relative],
+                )
             for path in inventory:
                 relative = path.relative_to(codex_home).as_posix()
                 if not path.is_file() or _sha256_bytes(path.read_bytes()) != expected_inventory[relative]:
                     raise InstallAbort("post-write state publication fingerprint mismatch")
             if plugin_install_needed:
+                plugin_config_before = config_path.read_bytes() if config_path.is_file() else None
+                if plugin_config_before is None:
+                    raise InstallAbort("config.toml disappeared before plugin installation")
+                _, plugin_config_before_parsed = _decode_config(
+                    plugin_config_before,
+                    source="pre-plugin",
+                )
                 plugin = _install_plugin(
                     source_root=source_root,
                     codex_home=codex_home,
@@ -1376,11 +2165,33 @@ def install(
                 current_config = config_path.read_bytes() if config_path.is_file() else None
                 if current_config is None:
                     raise InstallAbort("config.toml disappeared during Plugin installation")
+                try:
+                    _, plugin_config_after_parsed = _decode_config(
+                        current_config,
+                        source="post-plugin",
+                    )
+                except InstallAbort as exc:
+                    raise InstallAbort("foreign config mutation during plugin installation") from exc
+                if _config_without_plugin_owned(plugin_config_before_parsed) != _config_without_plugin_owned(
+                    plugin_config_after_parsed
+                ):
+                    raise InstallAbort("foreign config mutation during plugin installation")
                 expected_inventory["config.toml"] = _sha256_bytes(current_config)
                 expected_state_inventory["config.toml"] = expected_inventory["config.toml"]
+                if state_version == RECONCILIATION_STATE_VERSION:
+                    pending_record["reconciliation"]["post_merge_target_fingerprints"] = dict(
+                        expected_state_inventory
+                    )
+            if state_version == RECONCILIATION_STATE_VERSION:
+                for source, backup in backup_paths.items():
+                    relative = source.relative_to(codex_home).as_posix()
+                    if relative in rollback_backups and backup.is_file():
+                        rollback_backups[relative]["sha256"] = _sha256_bytes(
+                            backup.read_bytes()
+                        )
             ownership = dict(pending_record["owned_legacy"])
             record = {
-                "state_version": 3,
+                "state_version": state_version,
                 "status": "committed",
                 "target_fingerprints": expected_state_inventory,
                 "original_targets": state_pre_targets,
@@ -1391,6 +2202,15 @@ def install(
                 "owned_legacy": ownership,
                 "hook_registration": projection_state(desired_hook_projection),
             }
+            if state_version == RECONCILIATION_STATE_VERSION:
+                record["reconciliation"] = {
+                    "accepted_targets": sorted(accepted_targets),
+                    "previous_state_sha256": _sha256_bytes(state_original) if state_original else "",
+                    "previous_state_backup": previous_state_backup,
+                    "previous_target_fingerprints": reconciliation_previous_targets,
+                    "accepted_preimages": accepted_preimages,
+                    "post_merge_target_fingerprints": expected_state_inventory,
+                }
             state_payload = json.dumps(record, sort_keys=True).encode() + b"\n"
             _assert_active_instruction_file(codex_home, user_policy_path)
             _atomic_write_if_unchanged(
@@ -1402,6 +2222,11 @@ def install(
             if not state_path.is_file() or state_path.read_bytes() != state_payload:
                 raise InstallAbort("published install state changed before verification")
             _assert_active_instruction_file(codex_home, user_policy_path)
+            if policy_identity is not None:
+                _assert_policy_identity(
+                    policy_identity,
+                    expected_sha256=expected_inventory[policy_relative],
+                )
             if any(not path.is_file() or _sha256_bytes(path.read_bytes()) != expected_inventory[path.relative_to(codex_home).as_posix()] for path in inventory):
                 raise InstallAbort("post-sidecar transaction fingerprint mismatch")
             if not pending.is_file() or pending.read_bytes() != pending_payload:
@@ -1460,6 +2285,21 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="explicitly integrate the active policy symlink target",
     )
+    parser.add_argument(
+        "--policy-root",
+        type=Path,
+        help="contained root allowed for an active policy symlink target",
+    )
+    parser.add_argument(
+        "--reconcile-current",
+        action="store_true",
+        help="accept selected current policy/config drift and publish reconciliation provenance",
+    )
+    parser.add_argument(
+        "--allow-plugin-downgrade",
+        action="store_true",
+        help="explicitly permit replacing an installed newer Pilotfish plugin",
+    )
     args = parser.parse_args(argv)
     try:
         return install(
@@ -1469,6 +2309,9 @@ def main(argv: list[str] | None = None) -> int:
             replace_drifted_roles=args.replace_drifted_roles,
             replace_drifted_role=tuple(args.replace_drifted_role),
             follow_policy_symlink=args.follow_policy_symlink,
+            policy_root=args.policy_root,
+            reconcile_current=args.reconcile_current,
+            allow_plugin_downgrade=args.allow_plugin_downgrade,
         )
     except InstallAbort as exc:
         print(f"aborted: {exc}", file=sys.stderr); return 2

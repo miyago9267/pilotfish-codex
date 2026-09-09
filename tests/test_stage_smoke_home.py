@@ -99,6 +99,37 @@ class CoOwnedHookStagingTests(unittest.TestCase):
             self.assertTrue((staged / stage_smoke_home.HOOK_SCRIPT).is_file())
             self.assertFalse((staged / "hooks" / backup.name).exists())
 
+    def test_legacy_role_rollback_backup_date_shape_is_omitted_from_stage(self) -> None:
+        self.assertTrue(
+            stage_smoke_home._rollback_backup(
+                Path("agents/plan-verifier.toml.pilotfish-codex-20260807")
+            )
+        )
+
+    def test_reconciled_v4_state_is_accepted_for_staging(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            active = self._installed_home(root)
+            policy = active / "AGENTS.md"
+            policy.write_bytes(policy.read_bytes() + b"\n# current rule\n")
+            installer.install(
+                source_root=ROOT,
+                codex_home=active,
+                dry_run=False,
+                check_codex=False,
+                reconcile_current=True,
+            )
+            staged = root / "staged"
+
+            with mock.patch.object(
+                stage_smoke_home,
+                "publish_no_replace",
+                side_effect=_portable_publish,
+            ):
+                stage_smoke_home.materialize(active, staged)
+
+            self.assertIn(b"# current rule", (staged / "AGENTS.md").read_bytes())
+
     def test_other_hook_backup_shapes_remain_rejected(self) -> None:
         names = (
             "other.py.pilotfish-codex-20260804-172335-358116",

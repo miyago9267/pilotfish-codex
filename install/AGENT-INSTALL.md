@@ -42,13 +42,18 @@ existing model and effort choices are preserved and may be changed later.
    workflow through Codex's local marketplace and `codex plugin add` contract.
 3. Locate the sibling install state
    `<CODEX_HOME>.pilotfish-install-state.json`. A `.pending` state or stale
-   committed fingerprint stops the installation for operator resolution.
+   committed fingerprint stops the installation for operator resolution. The
+   one explicit reconciliation path is `--reconcile-current`; it accepts only
+   current policy/config drift whose Pilotfish routing projection is unchanged
+   and publishes state version 4 with preimage, identity, and rollback evidence.
 4. Present changed paths, timestamped backups, unowned legacy keys, and
    customized same-name roles. Valid extra user roles are preserved and do not
    block installation. General home-write approval never approves customized
    same-name role replacement.
 5. Obtain the separate home-write approval before backing up or writing a real
-   Codex home. Offline tests use only temporary homes.
+   Codex home. Offline tests use only temporary homes. An installed plugin newer
+   than this checkout stops unless `--allow-plugin-downgrade` is explicitly
+   selected.
 
 The installer uses a pending sidecar, stages all target files, writes backups
 before replacement, validates the post-write fingerprint, then atomically
@@ -73,10 +78,15 @@ concurrency key and an active managed bootstrap block in `AGENTS.md`; migration
 removes only the exact proven old V2 table. Existing user policy bytes outside
 the managed block are preserved byte-for-byte.
 
-The sidecar is state version 3 for new installs and records Plugin name,
-version, source digest, and `installed` or `unavailable` status. An unavailable
-Plugin does not invalidate the native runtime, but the installer must not claim
-that the Skill is active.
+The sidecar is state version 3 for ordinary installs and records Plugin name,
+version, source digest, and `installed` or `unavailable` status. A reconciled
+current policy or an explicitly followed contained policy symlink publishes
+state version 4, including the previous sidecar digest, accepted target
+preimages/identities, post-merge fingerprints, and root-anchored backup
+manifests. An unavailable Plugin does not invalidate the native runtime, but
+the installer must not claim that the Skill is active. Plugin installation is
+allowed to update only Pilotfish's own `plugins`/`marketplaces` entries; any
+other config mutation aborts and remains visible for recovery.
 
 Release-pinned canonical v1.3.0 `plan-verifier` and `security-reviewer` bytes
 may upgrade to their packaged v1.3.1 replacements. The released canonical
@@ -102,7 +112,12 @@ bash install/install.sh --dry-run --codex-home "$ACTIVE_CODEX_HOME"
 bash install/install.sh --codex-home "$ACTIVE_CODEX_HOME"
 
 # Only after verifying that the active policy is an intended dotfiles-managed target:
-bash install/install.sh --follow-policy-symlink --codex-home "$ACTIVE_CODEX_HOME"
+bash install/install.sh --dry-run --follow-policy-symlink \
+  --policy-root "$HOME/dotfile/config/ai" --reconcile-current \
+  --codex-home "$ACTIVE_CODEX_HOME"
+bash install/install.sh --follow-policy-symlink \
+  --policy-root "$HOME/dotfile/config/ai" --reconcile-current \
+  --codex-home "$ACTIVE_CODEX_HOME"
 ```
 
 ```powershell

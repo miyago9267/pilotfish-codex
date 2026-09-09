@@ -45,6 +45,7 @@ PROJECTED_TOP_LEVEL = HASHED_TOP_LEVEL | REQUIRED_RUNTIME_FILES
 HOOK_SCRIPT = Path("hooks/pilotfish_autoroute_gate.py")
 SOURCE_HOOK_REGISTRATION = Path(__file__).resolve().parents[1] / "templates" / "hooks.json"
 ROLLBACK_STAMP_RE = re.compile(r"^(?:\d{8}-\d{6}|\d{8}-\d{6}-\d{6})$")
+LEGACY_ROLE_ROLLBACK_STAMP_RE = re.compile(r"^\d{8}$")
 SMOKE_CONFIG = (
     b'model = "gpt-5.6-luna"\n'
     b'model_reasoning_effort = "medium"\n'
@@ -384,17 +385,18 @@ def _active_hook_state(
             "policy_ownership",
         }
         expected_v3_keys = expected_keys | {"plugin", "runtime_status", "rollback_backups"}
+        expected_v4_keys = expected_v3_keys | {"reconciliation"}
         if (
             not isinstance(state, dict)
             or set(state) not in (
                 expected_keys, expected_keys - {"policy_ownership"},
-                expected_v3_keys,
+                expected_v3_keys, expected_v4_keys,
             )
             or type(state.get("state_version")) is not int
-            or state["state_version"] not in (2, 3)
+            or state["state_version"] not in (2, 3, 4)
             or state.get("status") != "committed"
         ):
-            raise HookRegistrationError("install state is not committed v2/v3")
+            raise HookRegistrationError("install state is not committed v2/v3/v4")
         projection_id = validate_projection_state(state["hook_registration"])
         if projection_id != CURRENT_PROJECTION_ID:
             raise HookRegistrationError("active hook projection is not current")
@@ -468,7 +470,13 @@ def _rollback_backup(relative: Path) -> bool:
     if name.endswith(marker):
         name = name[: -len(marker)]
     base, separator, stamp = name.rpartition(".pilotfish-codex-")
-    if not separator or not ROLLBACK_STAMP_RE.fullmatch(stamp):
+    if not separator or not (
+        ROLLBACK_STAMP_RE.fullmatch(stamp)
+        or (
+            relative.parts[0] == "agents"
+            and LEGACY_ROLE_ROLLBACK_STAMP_RE.fullmatch(stamp)
+        )
+    ):
         return False
     if len(relative.parts) == 1:
         return base in {"config.toml", "AGENTS.md", "AGENTS.override.md"} and (

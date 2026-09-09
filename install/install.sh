@@ -30,6 +30,7 @@ Wrapper options:
 
 Installer options are forwarded unchanged to install.py. Supported options
 include --dry-run, --codex-home, --follow-policy-symlink,
+--policy-root, --reconcile-current, --allow-plugin-downgrade,
 --replace-drifted-role, and --replace-drifted-roles.
 
 PILOTFISH_REF is used when --ref is not supplied; the default is main. A local

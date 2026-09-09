@@ -75,7 +75,9 @@ Wrapper options:
                      is available. The same value may be written --ref=REF.
 
 Installer options are forwarded unchanged to install.py, including
---dry-run, --codex-home, --replace-drifted-role, and --replace-drifted-roles.
+--dry-run, --codex-home, --follow-policy-symlink, --policy-root,
+--reconcile-current, --allow-plugin-downgrade, --replace-drifted-role,
+and --replace-drifted-roles.
 PILOTFISH_REF is used when --ref is not supplied; the default is main.
 "@ | Write-Output
     exit 0
