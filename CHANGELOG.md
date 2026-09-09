@@ -10,6 +10,21 @@ are noted only as source references.
 - Add the `pilotfish-decision-checkpoint-v1` contract with bounded options,
   conservative confirmation/rejection handling, and an explicit resume record.
 
+## v1.8.0-rc.1
+
+- Establish capability-first routing: Astra is reserved for tool-heavy, MCP,
+  computer-use, and cross-system execution or verification paths; Luna remains
+  the mechanical/scout baseline and Sol remains the cost-conscious reasoning
+  route.
+- Correct the routing benchmark price baseline and keep benchmark-only cost and
+  wait evidence out of runtime dispatch.
+- Add current-preserving installer reconciliation with state-v4 provenance,
+  symlink identity and TOCTOU checks, exact rollback manifests, and plugin
+  mutation/downgrade guards.
+- Record the 6-trial Luna/Terra/Sol paid baseline smoke (`$0.59352` observed,
+  2/6 accepted) as directional evidence; defer the Astra promotion cohort and
+  its 36-verdict gate.
+
 ## v1.6.3
 
 - Add the Hybrid runtime: a minimal always-on root bootstrap plus the

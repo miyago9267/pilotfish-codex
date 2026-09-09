@@ -2,7 +2,7 @@
 id: pilotfish-work-status
 title: Pilotfish Codex work status
 status: active
-updated: 2026-08-10
+updated: 2026-09-09
 owner: Miyago
 ---
 
@@ -14,6 +14,21 @@ owner: Miyago
 
 完成 Hybrid Pilotfish runtime spec：root always-on bootstrap、Codex Plugin／Skill、
 native runtime、policy ownership、transaction、migration 與 fresh-session probe。
+
+## Current release candidate — v1.8.0-rc.1
+
+- [x] 以 capability-first policy 將 Astra 限定在 tool-heavy、MCP、computer-use
+  與跨系統 execution／verification candidate path；`plan-verifier`、四個 Luna
+  baseline role 與既有 Sol gate 不變。
+- [x] 修正 routing benchmark 價格基準，並保留低密度 paid baseline smoke 的
+  directional-only 限制。
+- [x] installer state v4 reconciliation、symlink identity、TOCTOU、rollback
+  manifest 與 plugin downgrade guard 通過獨立 verifier。
+- [x] repo 版本、manifest、policy marker、changelog 已同步至
+  `1.8.0-rc.1`；尚未 push 或建立 tag。
+- [x] 依 user approval 將 RC 安裝至全域 `/Users/miyago/.codex`，保留現行
+  canonical policy 與 role drift 邊界；state v4 為 `integrated`、Plugin
+  `1.8.0-rc.1`，pending sidecar 不存在。
 
 ## Completed
 
@@ -46,7 +61,7 @@ native runtime、policy ownership、transaction、migration 與 fresh-session pr
 - [x] Installer state v3：記錄 Plugin name/version/source digest/status、runtime
   outcome 與 exact rollback backup manifest；Codex
   CLI 不可用時保留 native fallback 並標記 `unavailable`。
-- [x] Current targeted/full Python verification：342 tests，1 skipped，全部通過；
+- [x] Historical targeted/full Python verification：342 tests，1 skipped，全部通過；
   Plugin、Skill validators 與 `git diff --check` 通過。
 - [x] Plugin discovery probe：installer 會用 `codex plugin list --json` 驗證
   name、marketplace、version 與 enabled，未通過時不宣稱 Skill active。
@@ -130,35 +145,20 @@ native runtime、policy ownership、transaction、migration 與 fresh-session pr
 
 ## Next smallest action
 
-Hybrid spec、Policy `1.6.3` 與 Installer `1.7.0` 已完成。POSIX 使用
-`install/install.sh`，native Windows 使用 `install/install.ps1`，兩者共用
-`install/install.py`；Windows PowerShell entrypoint 由 CI 驗證，本機未安裝
-`pwsh`。目前 user host 已完成實機升級與 fresh-session probe。
+`v1.8.0-rc.1` 已完成 repo 變更與全域安裝；目前應建立 commit、annotated tag，
+推送 `main` 與 RC tag，再建立 GitHub pre-release。付費 Astra cohort、正式
+promotion 與 stable release 不在此步驟內。
 
-下一個最小動作是處理 `review-block-deduplication` spec 尚未完成的三平台 hook
-parity；decision checkpoint、session resume 已完成並保留在 `Unreleased`，不屬於
-本次 `1.6.3`／`1.7.0` release。
+## Historical release record
 
-舊版 state v2 若缺少後續加入的 `policy_ownership` 欄位，已納入受限相容升級；
-仍須通過既有 target fingerprint、hook projection 與 config provenance 驗證。
+以下為 RC 之前的歷史基線，不代表目前 host 狀態：
 
-Codex marketplace package 使用官方 `.agents/plugins/marketplace.json` layout；
-實機安裝前曾因舊 layout 被 CLI 拒絕，已修正；另已修正 marketplace registration
-寫入 `config.toml` 後的 post-sidecar fingerprint 收斂，並已完成實機重新安裝。
-
-實機結果：`runtime_status=integrated`、Plugin `installed`、Skill `available`；
-Policy marker 為 `1.6.3`、Plugin 為 `1.7.0`；active policy symlink 保留並以
-`integrated-symlink-target` 記錄。一次失敗交易的
-pending sidecar 已保留為 `/Users/miyago/.codex.pilotfish-install-state.json.aborted-20260810T141400Z`，可供追查，未刪除。
-
-最後驗證：342 tests passed、1 skipped，Plugin validator、Markdown lint、native
-config/role validator、fresh session probe 與 decision checkpoint acceptance
-smoke 均通過。
-
-Release baseline：Policy 為 `1.6.3`、Installer 為 `1.7.0`，已建立
-`1.6.3` 與 `1.7.0` annotated tags；GitHub Release 已依序發布為 `v1.6.3`
-與 `v1.7.0`，未來 release 標題統一為 `vX.Y.Z`。decision checkpoint 功能
-保留在 `Unreleased`。
+- `v1.6.3`／`v1.7.0` 已完成 Hybrid runtime、Windows installer 與首次
+  marketplace activation，相關 release 已建立並發布。
+- 舊版 state v2 的受限相容升級、Codex marketplace layout、post-sidecar
+  fingerprint 收斂與 fresh-session probe 已完成。
+- 當時的驗證數字為 342 tests passed、1 skipped；目前 RC 的最新驗證為 398
+  tests passed、1 skipped。
 
 ## Handoff rule
 
