@@ -10,6 +10,13 @@ are noted only as source references.
 - Add the `pilotfish-decision-checkpoint-v1` contract with bounded options,
   conservative confirmation/rejection handling, and an explicit resume record.
 
+## v1.8.0-rc.2
+
+- Preserve exact rollback bytes on Windows by opening rollback sources and
+  backups in binary mode; this keeps CRLF policy files and race checks intact.
+- Publish the corrected release candidate from the post-CI-fix mainline while
+  leaving the existing `v1.8.0-rc.1` tag immutable.
+
 ## v1.8.0-rc.1
 
 - Establish capability-first routing: Astra is reserved for tool-heavy, MCP,
