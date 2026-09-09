@@ -28,9 +28,11 @@ native runtime、policy ownership、transaction、migration 與 fresh-session pr
   `1.8.0-rc.2`；既有 immutable annotated tag `v1.8.0-rc.1` 保持不變。
 - [x] 依 user approval 將 RC 安裝至全域 `/Users/miyago/.codex`，保留現行
   canonical policy 與 role drift 邊界；state v4 為 `integrated`、Plugin
-  `1.8.0-rc.1`，pending sidecar 不存在；rc.2 重裝待 release commit。
+  `1.8.0-rc.2`，pending sidecar 不存在。
 - [x] Windows rollback byte path 已加入 `O_BINARY`，mainline 三平台 CI
   已全綠；rc.2 pre-release 使用修正版 commit。
+- [x] `v1.8.0-rc.2` annotated tag 已指向 `5c4b0b6` 並推送；Python CI
+  `34333148355` 與 Markdown CI `34333148451` 均通過。
 
 ## Completed
 
@@ -147,7 +149,7 @@ native runtime、policy ownership、transaction、migration 與 fresh-session pr
 
 ## Next smallest action
 
-建立並推送 `v1.8.0-rc.2` annotated tag，再建立 GitHub pre-release。既有
+建立 GitHub pre-release（來源為已驗證的 `v1.8.0-rc.2` tag）。既有
 `v1.8.0-rc.1` tag 保持 immutable；付費 Astra cohort、正式
 promotion 與 stable release 不在此步驟內。
 
