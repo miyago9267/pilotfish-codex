@@ -1,5 +1,5 @@
 <!-- pilotfish-codex:begin -->
-<!-- pilotfish-codex v1.7.1 -->
+<!-- pilotfish-codex v1.8.0-rc.1 -->
 <!-- markdownlint-disable-next-line MD041 -->
 ### Orchestration
 
@@ -22,6 +22,43 @@ Complete small, local, already-stable work directly.
 | `executor` | Bounded implementation requiring local judgment |
 | `verifier` | Calibrated completed-work falsification; `CONFIRMED`, `REFUTED`, or `INCONCLUSIVE` |
 | `security-executor` | Approved security-sensitive implementation |
+
+#### Capability-first model routing
+
+Choose a model candidate from the work surface, not from a vague impression
+that the task needs "more thinking". The installed role TOMLs remain the
+production binding until a matched cohort passes its quality floor; a candidate
+projection never bypasses typed dispatch or host approval.
+
+| Work surface | Default candidate | Conditional Astra candidate |
+|---|---|---|
+| Local, structured, or routine work | The role's current Luna binding | Never escalate for difficulty alone |
+| Pure Plan or semantic judgment | Sol where the existing contract requires it | Do not replace `plan-verifier` |
+| Security review with cross-file or cross-system evidence | Current reviewer binding | `security-reviewer` at Astra `high`, read-only |
+| Verification or execution spanning systems, browser, MCP, terminal, deployment evidence, or a long acceptance flow | Current role binding | `verifier` or `executor` at Astra `high` when the trigger is explicit |
+| Fingerprinted disagreement between two verdicts | Existing adjudication path | One Astra `high` adjudication, then stop |
+
+`mech-executor` and `scout` are baseline-only roles. Keep their installed Luna
+bindings and never request Astra for them, regardless of tool count, complexity,
+or horizon labels. If the work exceeds a mechanical or reconnaissance boundary,
+route to `executor` or `verifier` instead of upgrading the child in place.
+
+Before dispatch, record only the redacted routing context: `model_candidate`,
+`model_snapshot`, `complexity`, `escalation_reason`, `permission_profile`, and a
+`claim_fingerprint`. Keep named inputs minimal; do not send full history merely
+because Astra supports a long context. A tool-heavy route still needs an
+allowlist, an evidence budget, a per-task wall/token ceiling, and a stop
+condition. Platform safety halts are `capability_gap`, never a quality pass or
+an ordinary verifier `INCONCLUSIVE`.
+
+Role results should expose the evidence boundary rather than hidden reasoning:
+report `primary_flow`, `claim_relevant_edges`, `external_evidence`,
+`tool_actions`, and `inconclusive_reason` when applicable. Preserve the
+existing verdict vocabulary and approval semantics.
+
+Do not create a new computer-use role in this phase. Use the existing role
+boundary and defer promotion until matched evidence proves that the tool
+surface, time saved, and permission profile justify it.
 
 #### Decision cues
 

@@ -6,6 +6,7 @@ import os
 import stat
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +15,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "install"))
 import benchmark_routing as benchmark  # noqa: E402
+import verify_dispatch  # noqa: E402
 
 
 class ManifestTests(unittest.TestCase):
@@ -105,6 +107,31 @@ class HomeAndAuthTests(unittest.TestCase):
             self.assertFalse((root / "pilotfish-benchmark-codex").exists())
             self.assertEqual(source.split(b"developer_instructions = ", 1)[1], (ROOT / "templates" / "agents" / "mech-executor.toml").read_bytes().split(b"developer_instructions = ", 1)[1])
 
+    def test_live_trial_home_uses_current_native_v2_schema_only_when_requested(self) -> None:
+        candidate = benchmark.CANDIDATES["routine"][0]
+        with tempfile.TemporaryDirectory() as directory:
+            with benchmark.temporary_trial_home(
+                "mech-executor",
+                candidate,
+                parent_dir=Path(directory),
+                native_v2_compat=True,
+            ) as trial:
+                config = tomllib.loads((trial.home / "config.toml").read_text())
+                self.assertEqual(config["features"]["multi_agent_v2"]["enabled"], True)
+                self.assertEqual(
+                    config["features"]["multi_agent_v2"]["max_concurrent_threads_per_session"],
+                    4,
+                )
+                self.assertNotIn("max_concurrent_threads_per_session", config)
+
+    def test_benchmark_wait_window_is_explicitly_bounded(self) -> None:
+        config = tomllib.loads(benchmark.NATIVE_V2_BENCHMARK_CONFIG.decode("utf-8"))
+        multi_agent = config["features"]["multi_agent_v2"]
+        self.assertEqual(benchmark.BENCHMARK_WAIT_TIMEOUT_MS, 120_000)
+        self.assertEqual(multi_agent["default_wait_timeout_ms"], benchmark.BENCHMARK_WAIT_TIMEOUT_MS)
+        self.assertEqual(multi_agent["max_wait_timeout_ms"], benchmark.BENCHMARK_WAIT_TIMEOUT_MS)
+        self.assertLess(benchmark.BENCHMARK_WAIT_TIMEOUT_MS, 300_000)
+
     def test_auth_copy_rejects_symlink_and_cleans_destination(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -184,6 +211,51 @@ class ReceiptMetricsTests(unittest.TestCase):
             )
         self.assertEqual(receipt["case_id"], "routine-01")
 
+    def test_native_rollout_locations_use_session_metadata_fallback(self) -> None:
+        parent_id, child_id = "parent-runtime-id", "child-runtime-id"
+        parent = [
+            {"type": "session_meta", "payload": {"id": parent_id}},
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "name": "spawn_agent",
+                    "call_id": "call-1",
+                    "arguments": json.dumps(
+                        {
+                            "message": "ready",
+                            "agent_type": "mech-executor",
+                            "task_name": "model_probe_mech_executor",
+                            "fork_turns": "none",
+                        }
+                    ),
+                },
+            },
+        ]
+        child = [
+            {
+                "type": "session_meta",
+                "payload": {"id": child_id, "parent_thread_id": parent_id},
+            }
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            sessions = home / "sessions"
+            sessions.mkdir()
+            (sessions / f"rollout-{parent_id}.jsonl").write_text(
+                "\n".join(json.dumps(event) for event in parent) + "\n"
+            )
+            (sessions / f"rollout-{child_id}.jsonl").write_text(
+                "\n".join(json.dumps(event) for event in child) + "\n"
+            )
+            parent_path, child_path = benchmark.locate_native_parent_child_rollouts(
+                home,
+                json.dumps({"type": "thread.started", "thread_id": parent_id}),
+            )
+
+        self.assertEqual(parent_path.name, f"rollout-{parent_id}.jsonl")
+        self.assertEqual(child_path.name, f"rollout-{child_id}.jsonl")
+
     def test_codexbar_formula_and_strict_schema(self) -> None:
         metrics = benchmark.normalize_codexbar_totals(
             [{"provider": "codex", "source": "codexbar", "updatedAt": "2026-08-03T00:00:00Z", "totals": {"inputTokens": 100, "outputTokens": 20, "cacheReadTokens": 10, "cacheCreationTokens": 4, "totalTokens": 134, "totalCost": 1.2}}]
@@ -243,7 +315,7 @@ class ReceiptMetricsTests(unittest.TestCase):
         self.assertEqual(metrics.output, 50)
         self.assertEqual(metrics.reasoning_output, 20)
         self.assertEqual(metrics.total, 200)
-        self.assertAlmostEqual(metrics.cost, 0.000424)
+        self.assertAlmostEqual(metrics.cost, 0.0000848)
         self.assertEqual(metrics.source, "native-rollout-proxy")
 
     def test_native_rollout_prices_fixed_luna_parent_separately_from_child(self) -> None:
@@ -289,7 +361,7 @@ class ReceiptMetricsTests(unittest.TestCase):
                 parent_rollout=paths[0],
                 child_rollout=paths[1],
             )
-        self.assertAlmostEqual(metrics.cost, 0.0006655)
+        self.assertAlmostEqual(metrics.cost, 0.0003746)
 
     def test_codexbar_nested_schema_drift_fails_closed(self) -> None:
         totals = {
@@ -410,7 +482,122 @@ class CliTests(unittest.TestCase):
         self.assertIn("agent_type='mech-executor'", prompt)
         self.assertIn("task_name='model_probe_mech_executor'", prompt)
         self.assertIn("fork_turns='none'", prompt)
-        self.assertIn("wait_agent exactly once with timeout_ms=30000", prompt)
+        self.assertIn(
+            f"wait_agent exactly once with timeout_ms={benchmark.BENCHMARK_WAIT_TIMEOUT_MS}",
+            prompt,
+        )
+
+    def test_benchmark_receipt_passes_extended_wait_to_evidence_inspector(self) -> None:
+        candidate = benchmark.CANDIDATES["routine"][0]
+        observed = SimpleNamespace(
+            status="NATIVE_OK",
+            reason_code="native_verified",
+            task_name="model_probe_mech_executor",
+            parent_ref="parent",
+            child_ref="child",
+            fork_turns="none",
+        )
+        with mock.patch(
+            "verify_dispatch.inspect_available_evidence",
+            return_value=(observed, True),
+        ) as inspector:
+            benchmark.parse_native_dispatch_receipt(
+                Path("/tmp/benchmark-home"),
+                "",
+                role="mech-executor",
+                candidate=candidate,
+                case_id="routine-01",
+            )
+        self.assertEqual(
+            inspector.call_args.kwargs["expected_wait_timeout_ms"],
+            benchmark.BENCHMARK_WAIT_TIMEOUT_MS,
+        )
+
+    def test_delayed_child_trace_and_artifact_use_extended_wait(self) -> None:
+        parent_id, child_id, call_id = "parent-delayed", "child-delayed", "call-delayed"
+        wait_timeout = benchmark.BENCHMARK_WAIT_TIMEOUT_MS
+        elapsed_ms = 31_000
+        parent_events = [
+            {"type": "session_meta", "payload": {"id": parent_id}},
+            {"type": "turn_context", "payload": {"model": "gpt-5.6-luna", "effort": "medium"}},
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "name": "spawn_agent",
+                    "call_id": call_id,
+                    "arguments": json.dumps(
+                        {
+                            "message": "write the declared artifact",
+                            "agent_type": "mech-executor",
+                            "task_name": "model_probe_mech_executor",
+                            "fork_turns": "none",
+                        }
+                    ),
+                },
+            },
+            {
+                "type": "event_msg",
+                "payload": {
+                    "type": "sub_agent_activity",
+                    "kind": "started",
+                    "event_id": call_id,
+                    "agent_thread_id": child_id,
+                },
+            },
+            {"type": "event_msg", "payload": {"type": "child_completed", "elapsed_ms": elapsed_ms}},
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "name": "wait_agent",
+                    "call_id": "wait-delayed",
+                    "arguments": json.dumps({"timeout_ms": wait_timeout}),
+                },
+            },
+        ]
+        child_events = [
+            {"type": "session_meta", "payload": {"id": child_id, "parent_thread_id": parent_id}},
+            {"type": "turn_context", "payload": {"model": "gpt-5.6-luna", "effort": "medium"}},
+        ]
+        self.assertGreater(elapsed_ms, 30_000)
+        self.assertLess(elapsed_ms, wait_timeout)
+        verdict = verify_dispatch.inspect_dispatch(
+            parent_events,
+            child_events,
+            expected_role=verify_dispatch.RoleBinding("gpt-5.6-luna", "medium"),
+            expected_role_name="mech-executor",
+            expected_task_name="model_probe_mech_executor",
+            expected_wait_timeout_ms=wait_timeout,
+        )
+        self.assertEqual((verdict.status, verdict.reason_code), ("NATIVE_OK", "native_verified"))
+
+        case = benchmark.load_manifest()["cases"][0]
+        fixture = ROOT / str(case["fixture"]["path"])
+        with benchmark.disposable_case_workspace(fixture) as workspace:
+            fixture_data = json.loads((workspace / "fixture.json").read_text(encoding="utf-8"))
+            (workspace / "result.json").write_text(
+                json.dumps(
+                    {
+                        "case_id": fixture_data["case_id"],
+                        "accepted": True,
+                        "artifact": fixture_data["expected_artifact"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            packet = benchmark.run_manifest_acceptance(case, workspace)
+        self.assertTrue(packet["accepted"])
+        self.assertEqual(
+            verify_dispatch.inspect_dispatch(
+                parent_events,
+                child_events,
+                expected_role=verify_dispatch.RoleBinding("gpt-5.6-luna", "medium"),
+                expected_role_name="mech-executor",
+                expected_task_name="model_probe_mech_executor",
+            ).reason_code,
+            "policy_violation",
+        )
 
     def test_benchmark_command_uses_disposable_workspace_write_access(self) -> None:
         command = benchmark.build_benchmark_codex_command(
@@ -432,6 +619,94 @@ class CliTests(unittest.TestCase):
             benchmark.run_live(trials=36, auth_source=Path("/tmp/auth.json"))
         with self.assertRaises(benchmark.BenchmarkError):
             benchmark.run_live(trials=36, auth_source=Path("/tmp/auth.json"), yes=True, benchmark_yes=True, environ={"CI": "true"})
+
+    def test_live_density_is_balanced_and_default_is_sparse(self) -> None:
+        manifest = benchmark.load_manifest()
+        matrix = benchmark.select_live_matrix(manifest, 6)
+        self.assertEqual(
+            [(case["id"], candidate.model) for case, candidate in matrix],
+            [
+                ("routine-01", "gpt-5.6-luna"),
+                ("routine-01", "gpt-5.6-terra"),
+                ("routine-01", "gpt-5.6-sol"),
+                ("judgment-01", "gpt-5.6-luna"),
+                ("judgment-01", "gpt-5.6-terra"),
+                ("judgment-01", "gpt-5.6-sol"),
+            ],
+        )
+        args = benchmark._parser().parse_args(["--live"])
+        self.assertEqual(args.trials, benchmark.DEFAULT_TRIALS)
+        self.assertEqual(args.max_cost_usd, benchmark.DEFAULT_LIVE_MAX_COST_USD)
+        for invalid in (1, 7, 42):
+            with self.assertRaises(benchmark.BenchmarkError):
+                benchmark.select_live_matrix(manifest, invalid)
+
+    def test_live_budget_preflight_blocks_before_codex_starts(self) -> None:
+        with mock.patch.object(benchmark, "validate_live_codex_binary") as validator:
+            with self.assertRaisesRegex(benchmark.BenchmarkError, "estimated live cost"):
+                benchmark.run_live(
+                    trials=6,
+                    auth_source=Path("/tmp/auth.json"),
+                    yes=True,
+                    benchmark_yes=True,
+                    environ={},
+                    max_cost_usd=0.1,
+                )
+        validator.assert_not_called()
+
+    def test_sparse_live_runs_one_matched_case_per_cohort(self) -> None:
+        with (
+            mock.patch.object(benchmark, "validate_live_codex_binary"),
+            mock.patch.object(
+                benchmark,
+                "run_live_trial",
+                return_value={
+                    "metrics": {"source": "native-rollout-proxy"},
+                    "model_wall_seconds": 2.5,
+                },
+            ),
+        ):
+            report = benchmark.run_live(
+                trials=6,
+                auth_source=Path("/tmp/auth.json"),
+                yes=True,
+                benchmark_yes=True,
+                environ={},
+            )
+        self.assertEqual(len(report["trials"]), 6)
+        self.assertEqual(
+            [row["case_id"] for row in report["trials"]],
+            ["routine-01"] * 3 + ["judgment-01"] * 3,
+        )
+        self.assertEqual(report["budget"]["mode"], "sparse")
+        self.assertEqual(report["budget"]["observed_cost_usd"], 0.0)
+
+    def test_observed_live_cost_stops_the_next_trial_after_budget_breach(self) -> None:
+        evidence = {
+            "metrics": {"source": "native-rollout-proxy", "cost": 0.4},
+            "model_wall_seconds": 2.5,
+        }
+        with (
+            mock.patch.object(benchmark, "validate_live_codex_binary"),
+            mock.patch.object(benchmark, "run_live_trial", return_value=evidence),
+            mock.patch.object(benchmark, "write_checkpoint_report") as writer,
+        ):
+            with self.assertRaisesRegex(benchmark.BenchmarkError, "observed live cost"):
+                benchmark.run_live(
+                    trials=6,
+                    auth_source=Path("/tmp/auth.json"),
+                    yes=True,
+                    benchmark_yes=True,
+                    environ={},
+                    max_cost_usd=0.7,
+                    checkpoint_path=Path("/tmp/pilotfish-budget-checkpoint.json"),
+                )
+        self.assertEqual(writer.call_args.args[1]["status"], "failed")
+        self.assertEqual(len(writer.call_args.args[1]["trials"]), 2)
+        self.assertEqual(
+            writer.call_args.args[1]["failure"]["reason_code"],
+            "observed_budget_exceeded",
+        )
 
     def test_dry_run_emits_three_receipts_without_network(self) -> None:
         with mock.patch.object(benchmark, "run_live") as live:
@@ -470,6 +745,7 @@ class CliTests(unittest.TestCase):
                 benchmark_yes=True,
                 environ={},
                 checkpoint_path=checkpoint,
+                max_cost_usd=5.0,
             )
         self.assertEqual(len(report["trials"]), 36)
         self.assertEqual(writer.call_count, 36)
@@ -500,6 +776,7 @@ class CliTests(unittest.TestCase):
                     benchmark_yes=True,
                     environ={},
                     checkpoint_path=checkpoint,
+                    max_cost_usd=5.0,
                 )
         failed = writer.call_args.args[1]
         self.assertEqual(failed["status"], "failed")

@@ -4,6 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugin" / "plugins" / "pilotfish-codex"
+VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 
 
 class PluginPackageTests(unittest.TestCase):
@@ -15,7 +16,7 @@ class PluginPackageTests(unittest.TestCase):
         entry = marketplace["plugins"][0]
         self.assertEqual(entry["name"], manifest["name"])
         self.assertEqual(entry["source"]["path"], "./plugins/pilotfish-codex")
-        self.assertEqual(manifest["version"], "1.7.1")
+        self.assertEqual(manifest["version"], VERSION)
 
     def test_skill_is_complete_and_references_exist(self) -> None:
         skill = PLUGIN / "skills" / "pilotfish-orchestration"

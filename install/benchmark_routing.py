@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import shlex
 import signal
@@ -21,10 +22,13 @@ import stat
 import subprocess
 import tempfile
 import time
+import tomllib
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping, Sequence
+
+from routing_contract import build_routing_context, validate_routing_context
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,16 +46,44 @@ ROLE_NAMES = (
     "verifier",
 )
 TRIAL_CAP = 36
+LIVE_TRIAL_BATCH = 6
+DEFAULT_TRIALS = LIVE_TRIAL_BATCH
+DEFAULT_LIVE_MAX_COST_USD = 1.00
+BENCHMARK_WAIT_TIMEOUT_MS = 120_000
+LIVE_ESTIMATE_INPUT_TOKENS = 20_000
+LIVE_ESTIMATE_OUTPUT_TOKENS = 4_000
 PARENT_MODEL = "gpt-5.6-luna"
 PARENT_EFFORT = "medium"
 PARENT_PROMPT = (
-    "Run this benchmark task exactly as written. You are the parent and must "
-    "direct exactly one native typed child using agent_type=ROLE; do not create "
-    "any second child, do not use an untyped fallback, and return a terminal "
-    "JSON receipt."
+    "Run this benchmark task exactly as written. First classify the work surface "
+    "as routine, pure-judgment, or tool/cross-system-heavy. Keep routine work "
+    "on the current low-cost role binding; use an Astra candidate only when the "
+    "named tool or evidence trigger applies, never for difficulty alone. You are "
+    "bound to the smallest sufficient change: use only the named-input tool "
+    "allowlist, stop at max_tool_calls=20 or max_wall_seconds=600, and stop "
+    "once the acceptance evidence is sufficient. Report primary_flow, "
+    "claim_relevant_edges, external_evidence, tool_actions, and any "
+    "inconclusive_reason in the redacted receipt. You are "
+    "the parent and must direct exactly one native typed child using "
+    "agent_type=ROLE; do not create any second child, do not use an untyped "
+    "fallback, and return a terminal JSON receipt with the redacted routing "
+    "context."
 )
 REVIEW_VERDICTS = frozenset({"accept", "reject", "inconclusive"})
 CHAIN_ORDERS = ("LTS", "LS", "TS", "S")
+NATIVE_V2_BENCHMARK_CONFIG = (
+    b'model = "gpt-5.6-luna"\n'
+    b'model_reasoning_effort = "medium"\n'
+    b'plan_mode_reasoning_effort = "xhigh"\n\n'
+    b"[features]\n"
+    b"default_mode_request_user_input = true\n\n"
+    b"[features.multi_agent_v2]\n"
+    b"enabled = true\n"
+    b"max_concurrent_threads_per_session = 4\n"
+    b"min_wait_timeout_ms = 1000\n"
+    b"max_wait_timeout_ms = 120000\n"
+    b"default_wait_timeout_ms = 120000\n"
+)
 
 
 class BenchmarkError(ValueError):
@@ -96,6 +128,165 @@ class Candidate:
         return {"model": self.model, "reasoning_effort": self.reasoning_effort}
 
 
+# These are candidate projections only. The installed role TOMLs remain the
+# production binding until a matched cohort earns promotion.
+def _template_candidate(role: str) -> Candidate:
+    path = TEMPLATE_ROOT / "agents" / f"{role}.toml"
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise BenchmarkError(f"role template binding unavailable: {role}") from exc
+    model, effort = data.get("model"), data.get("model_reasoning_effort")
+    if not isinstance(model, str) or not isinstance(effort, str) or not model or not effort:
+        raise BenchmarkError(f"role template binding invalid: {role}")
+    return Candidate(model, effort)
+
+
+ROLE_CANDIDATES: dict[str, tuple[Candidate, Candidate]] = {
+    "security-reviewer": (
+        _template_candidate("security-reviewer"),
+        Candidate("gpt-6-astra", "high"),
+    ),
+    "verifier": (
+        _template_candidate("verifier"),
+        Candidate("gpt-6-astra", "high"),
+    ),
+    "executor": (
+        _template_candidate("executor"),
+        Candidate("gpt-6-astra", "high"),
+    ),
+    "semantic-adjudicator": (
+        Candidate("gpt-5.6-sol", "high"),
+        Candidate("gpt-6-astra", "high"),
+    ),
+}
+BASELINE_ONLY_ROLES = frozenset({"mech-executor", "scout"})
+BASELINE_ONLY_BINDINGS = {
+    "mech-executor": Candidate("gpt-5.6-luna", "medium"),
+    "scout": Candidate("gpt-5.6-luna", "low"),
+}
+
+
+def _baseline_candidate(role: str) -> Candidate:
+    configured = _template_candidate(role)
+    expected = BASELINE_ONLY_BINDINGS[role]
+    if configured != expected:
+        raise BenchmarkError(f"baseline-only role binding drift: {role}")
+    return configured
+
+
+def select_role_candidate(
+    role: str,
+    *,
+    complexity: str = "routine",
+    tool_actions: int = 0,
+    external_evidence: bool = False,
+    disagreement: bool = False,
+) -> tuple[Candidate, str]:
+    """Return the bounded candidate projection for one role invocation.
+
+    This does not mutate the installed role manifest or bypass native role
+    binding. It is the deterministic policy seam used by cohort preparation.
+    """
+    if complexity not in {"routine", "cross_system", "critical", "long_horizon"}:
+        raise BenchmarkError("unsupported task complexity")
+    if type(tool_actions) is not int or tool_actions < 0:
+        raise BenchmarkError("tool_actions must be a non-negative integer")
+    if role in BASELINE_ONLY_ROLES:
+        return _baseline_candidate(role), "baseline-only"
+    if role not in ROLE_CANDIDATES:
+        raise BenchmarkError(f"role has no Astra candidate: {role}")
+    baseline, astra = ROLE_CANDIDATES[role]
+    if role == "semantic-adjudicator":
+        return (astra, "disagreement") if disagreement else (baseline, "baseline")
+    tool_heavy = tool_actions > 0 or external_evidence
+    if tool_heavy or complexity == "cross_system":
+        return astra, "tool-complexity"
+    if complexity == "long_horizon":
+        return astra, "long-horizon"
+    return baseline, "baseline"
+
+
+def candidate_projection() -> dict[str, list[dict[str, str]]]:
+    """Return the bounded role candidate matrix for offline inspection."""
+    projection = {
+        role: [candidate.as_dict() for candidate in candidates]
+        for role, candidates in sorted(ROLE_CANDIDATES.items())
+    }
+    projection.update(
+        {
+            role: [_baseline_candidate(role).as_dict()]
+            for role in sorted(BASELINE_ONLY_ROLES)
+        }
+    )
+    return projection
+
+
+def price_usage(
+    model: str,
+    *,
+    input_tokens: int,
+    output_tokens: int,
+    cached_input_tokens: int = 0,
+    cache_write_input_tokens: int = 0,
+) -> float:
+    """Price one native usage record in USD using the current list rules."""
+    if model not in MODEL_PRICES:
+        raise MetricsUnavailable(f"unknown model price: {model}")
+    values = (input_tokens, output_tokens, cached_input_tokens, cache_write_input_tokens)
+    if any(type(value) is not int or value < 0 for value in values):
+        raise MetricsUnavailable("token usage must be non-negative integers")
+    if cached_input_tokens + cache_write_input_tokens > input_tokens:
+        raise MetricsUnavailable("cache usage exceeds input usage")
+    input_price, output_price = MODEL_PRICES[model]
+    surcharge = input_tokens > LONG_CONTEXT_INPUT_THRESHOLD
+    input_multiplier = LONG_CONTEXT_INPUT_MULTIPLIER if surcharge else 1.0
+    output_multiplier = LONG_CONTEXT_OUTPUT_MULTIPLIER if surcharge else 1.0
+    uncached = input_tokens - cached_input_tokens - cache_write_input_tokens
+    return (
+        uncached * input_price * input_multiplier
+        + cached_input_tokens * input_price * CACHE_READ_MULTIPLIER * input_multiplier
+        + cache_write_input_tokens * input_price * CACHE_WRITE_MULTIPLIER * input_multiplier
+        + output_tokens * output_price * output_multiplier
+    ) / 1_000_000
+
+
+def estimate_task_cost(
+    model: str,
+    *,
+    input_tokens: int,
+    output_tokens: int,
+    cached_input_tokens: int = 0,
+    cache_write_input_tokens: int = 0,
+    workload: str = "agentic",
+) -> float:
+    """Estimate cost after a declared task-level token-efficiency prior.
+
+    Recorded native usage must use :func:`price_usage` directly. This helper is
+    intentionally separate so a prior can never be applied twice to telemetry.
+    """
+    try:
+        factor = TOKEN_EFFICIENCY_FACTORS[workload][model]
+    except KeyError as exc:
+        raise MetricsUnavailable("unknown workload or model efficiency prior") from exc
+    return price_usage(
+        model,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cached_input_tokens=cached_input_tokens,
+        cache_write_input_tokens=cache_write_input_tokens,
+    ) * factor
+
+
+def failure_class_for_receipt(status: str, reason_code: str) -> str:
+    """Map platform safety halts separately from model uncertainty."""
+    if reason_code == "platform_halt":
+        return "capability_gap"
+    if status == "NATIVE_OK":
+        return "none"
+    return "execution"
+
+
 CANDIDATES: dict[str, tuple[Candidate, Candidate, Candidate]] = {
     "routine": (
         Candidate("gpt-5.6-luna", "medium"),
@@ -109,14 +300,63 @@ CANDIDATES: dict[str, tuple[Candidate, Candidate, Candidate]] = {
     ),
 }
 
-# USD per million tokens. Cache reads are billed at 10% of the input price and
-# cache writes at 125%; these are intentionally explicit so the primary metric
-# stays reproducible without depending on a global CodexBar database.
+LIVE_COHORTS = ("routine", "judgment")
+
+# USD per million tokens. These are the September 2026 list prices used by the
+# native rollout ledger. Cache reads are billed at 10% of input and cache writes
+# at 125%; long-context requests apply the documented input/output surcharge.
 MODEL_PRICES: dict[str, tuple[float, float]] = {
-    "gpt-5.6-luna": (1.0, 6.0),
-    "gpt-5.6-terra": (2.5, 15.0),
-    "gpt-5.6-sol": (5.0, 30.0),
+    "gpt-5.6-luna": (0.20, 1.20),
+    "gpt-5.6-terra": (2.00, 12.00),
+    "gpt-5.6-sol": (4.00, 20.00),
+    "gpt-6-astra": (10.00, 50.00),
 }
+CACHE_READ_MULTIPLIER = 0.10
+CACHE_WRITE_MULTIPLIER = 1.25
+LONG_CONTEXT_INPUT_THRESHOLD = 272_000
+LONG_CONTEXT_INPUT_MULTIPLIER = 2.0
+LONG_CONTEXT_OUTPUT_MULTIPLIER = 1.5
+TOKEN_EFFICIENCY_FACTORS: dict[str, dict[str, float]] = {
+    "agentic": {
+        "gpt-5.6-luna": 1.0,
+        "gpt-5.6-terra": 1.0,
+        "gpt-5.6-sol": 1.0,
+        "gpt-6-astra": 1 / 3,
+    },
+    "reasoning": {
+        "gpt-5.6-luna": 1.0,
+        "gpt-5.6-terra": 1.0,
+        "gpt-5.6-sol": 1.0,
+        # The raw Astra/Sol list-price ratio is 2.5x.  The measured
+        # intelligence-task ratio is 1.75x, so the declared token-efficiency
+        # prior is 1.75 / 2.5 rather than the 0.9 coding prior.
+        "gpt-6-astra": 0.7,
+    },
+}
+
+
+def _validate_live_trial_count(trials: int) -> None:
+    if (
+        type(trials) is not int
+        or trials < LIVE_TRIAL_BATCH
+        or trials > TRIAL_CAP
+        or trials % LIVE_TRIAL_BATCH != 0
+    ):
+        raise BenchmarkError(
+            "live mode requires a balanced trial count of "
+            f"{LIVE_TRIAL_BATCH}, {LIVE_TRIAL_BATCH * 2}, ... {TRIAL_CAP}"
+        )
+
+
+def _validate_live_budget(value: float) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or value <= 0
+    ):
+        raise BenchmarkError("live max cost must be a finite positive number")
+    return float(value)
 
 
 @dataclass(frozen=True)
@@ -372,6 +612,126 @@ def validate_manifest(
         raise BenchmarkError("manifest hard-case count is invalid")
 
 
+def select_live_matrix(
+    manifest: Mapping[str, Any], trials: int
+) -> list[tuple[Mapping[str, Any], Candidate]]:
+    """Select a balanced, matched subset without weakening the full manifest."""
+
+    _validate_live_trial_count(trials)
+    cases = manifest.get("cases")
+    if not isinstance(cases, list):
+        raise BenchmarkError("manifest cases are unavailable")
+    cases_by_cohort: dict[str, list[Mapping[str, Any]]] = {
+        cohort: [] for cohort in LIVE_COHORTS
+    }
+    for case in cases:
+        if not isinstance(case, Mapping):
+            raise BenchmarkError("manifest case is invalid")
+        cohort = case.get("cohort")
+        if isinstance(cohort, str) and cohort in cases_by_cohort:
+            cases_by_cohort[str(cohort)].append(case)
+    cases_per_cohort = trials // LIVE_TRIAL_BATCH
+    if any(len(cases_by_cohort[cohort]) < cases_per_cohort for cohort in LIVE_COHORTS):
+        raise BenchmarkError("manifest does not contain enough matched cases")
+
+    matrix: list[tuple[Mapping[str, Any], Candidate]] = []
+    for cohort in LIVE_COHORTS:
+        for case in cases_by_cohort[cohort][:cases_per_cohort]:
+            matrix.extend((case, candidate) for candidate in CANDIDATES[cohort])
+    return matrix
+
+
+def estimate_live_cost(
+    matrix: Sequence[tuple[Mapping[str, Any], Candidate]],
+    *,
+    input_tokens: int = LIVE_ESTIMATE_INPUT_TOKENS,
+    output_tokens: int = LIVE_ESTIMATE_OUTPUT_TOKENS,
+) -> float:
+    """Estimate parent-plus-child spend before a paid matrix starts.
+
+    This is a planning envelope, not provider-side billing enforcement. Native
+    observed cost is checked after every completed trial as a second circuit
+    breaker.
+    """
+
+    values = (input_tokens, output_tokens)
+    if any(type(value) is not int or value < 0 for value in values):
+        raise BenchmarkError("live estimate token envelope must be non-negative integers")
+    total = 0.0
+    for _case, candidate in matrix:
+        total += price_usage(
+            PARENT_MODEL,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+        total += price_usage(
+            candidate.model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+    return total
+
+
+def live_budget_summary(
+    matrix: Sequence[tuple[Mapping[str, Any], Candidate]],
+    *,
+    trials: int,
+    max_cost_usd: float,
+    observed_cost_usd: float = 0.0,
+) -> dict[str, Any]:
+    """Return redacted budget evidence suitable for a checkpoint or report."""
+
+    _validate_live_trial_count(trials)
+    if len(matrix) != trials:
+        raise BenchmarkError("live matrix and trial count do not match")
+    max_cost = _validate_live_budget(max_cost_usd)
+    if (
+        isinstance(observed_cost_usd, bool)
+        or not isinstance(observed_cost_usd, (int, float))
+        or not math.isfinite(float(observed_cost_usd))
+        or observed_cost_usd < 0
+    ):
+        raise BenchmarkError("observed live cost is invalid")
+    return {
+        "mode": "full" if trials == TRIAL_CAP else "sparse",
+        "trial_count": trials,
+        "max_cost_usd": max_cost,
+        "estimated_cost_usd": round(estimate_live_cost(matrix), 6),
+        "observed_cost_usd": round(float(observed_cost_usd), 6),
+        "estimate_envelope": {
+            "input_tokens_per_rollout": LIVE_ESTIMATE_INPUT_TOKENS,
+            "output_tokens_per_rollout": LIVE_ESTIMATE_OUTPUT_TOKENS,
+            "rollouts_per_trial": 2,
+        },
+    }
+
+
+def observed_live_cost(rows: Sequence[Mapping[str, Any]]) -> float:
+    """Sum native costs while tolerating redacted test doubles without cost."""
+
+    total = 0.0
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise BenchmarkError("live trial row is invalid")
+        metrics = row.get("metrics")
+        if metrics is None:
+            continue
+        if not isinstance(metrics, Mapping):
+            raise BenchmarkError("live metrics are invalid")
+        cost = metrics.get("cost")
+        if cost is None:
+            continue
+        if (
+            isinstance(cost, bool)
+            or not isinstance(cost, (int, float))
+            or not math.isfinite(float(cost))
+            or cost < 0
+        ):
+            raise BenchmarkError("live trial cost is invalid")
+        total += float(cost)
+    return total
+
+
 def _number(value: Any, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise MetricsUnavailable(f"CodexBar field {name} is not numeric")
@@ -473,8 +833,8 @@ def normalize_codexbar_totals(payload: Sequence[Mapping[str, Any]]) -> UsageMetr
         raise MetricsUnavailable("CodexBar token identity is invalid")
     weighted = (
         values["inputTokens"]
-        + values["cacheReadTokens"] * 0.1
-        + values["cacheCreationTokens"] * 1.25
+        + values["cacheReadTokens"] * CACHE_READ_MULTIPLIER
+        + values["cacheCreationTokens"] * CACHE_WRITE_MULTIPLIER
         + values["outputTokens"]
     )
     return UsageMetrics(
@@ -653,15 +1013,21 @@ def collect_native_rollout_metrics(
     )
     total_tokens = sum(record["total_tokens"] for record, _model in latest_records)
     cost = sum(
-        (
-            (record["input_tokens"] - record["cached_input_tokens"] - record["cache_write_input_tokens"]) * MODEL_PRICES[model][0]
-            + record["cached_input_tokens"] * MODEL_PRICES[model][0] * 0.1
-            + record["cache_write_input_tokens"] * MODEL_PRICES[model][0] * 1.25
-            + record["output_tokens"] * MODEL_PRICES[model][1]
+        price_usage(
+            model,
+            input_tokens=record["input_tokens"],
+            output_tokens=record["output_tokens"],
+            cached_input_tokens=record["cached_input_tokens"],
+            cache_write_input_tokens=record["cache_write_input_tokens"],
         )
         for record, model in latest_records
-    ) / 1_000_000
-    weighted_tokens = input_tokens + cached_read * 0.1 + cached_write * 1.25 + output_tokens
+    )
+    weighted_tokens = (
+        input_tokens
+        + cached_read * CACHE_READ_MULTIPLIER
+        + cached_write * CACHE_WRITE_MULTIPLIER
+        + output_tokens
+    )
     return UsageMetrics(
         input=float(input_tokens),
         output=float(output_tokens),
@@ -725,6 +1091,13 @@ def validate_binding_receipt(
             raise ReceiptError("receipt JSON is invalid") from exc
     if not isinstance(receipt, Mapping):
         raise ReceiptError("receipt is not an object")
+    routing = receipt.get("routing")
+    if not isinstance(routing, Mapping):
+        raise ReceiptError("receipt routing context is missing")
+    try:
+        validate_routing_context(routing)
+    except ValueError as exc:
+        raise ReceiptError("receipt routing context is invalid") from exc
     if receipt.get("status") != "NATIVE_OK":
         raise ReceiptError("native V2 receipt is not successful")
     if receipt.get("native_v2") is False or receipt.get("typed") is False:
@@ -743,6 +1116,12 @@ def validate_binding_receipt(
         raise ReceiptError("child role binding mismatch")
     if (child_model, child_effort) != (expected_candidate.model, expected_candidate.reasoning_effort):
         raise ReceiptError("child model/effort binding mismatch")
+    if (
+        routing["role"] != expected_role
+        or routing["model_candidate"] != expected_candidate.model
+        or routing["model_snapshot"] != f"{expected_candidate.model}@{expected_candidate.reasoning_effort}"
+    ):
+        raise ReceiptError("receipt routing candidate mismatch")
     parent_model = parent.get("model")
     parent_effort = parent.get("reasoning_effort", parent.get("effort"))
     if (parent_model, parent_effort) != (PARENT_MODEL, PARENT_EFFORT):
@@ -755,9 +1134,36 @@ def validate_binding_receipt(
     return dict(receipt)
 
 
-def build_binding_receipt(role: str, candidate: Candidate, *, case_id: str = "dry-run") -> dict[str, Any]:
+def build_binding_receipt(
+    role: str,
+    candidate: Candidate,
+    *,
+    case_id: str = "dry-run",
+    complexity: str = "routine",
+    escalation_reason: str = "baseline",
+    permission_profile: str | None = None,
+) -> dict[str, Any]:
     if role not in ROLE_NAMES:
         raise ReceiptError("unknown role")
+    if permission_profile is None:
+        permission_profile = (
+            "read-only"
+            if role in {"scout", "plan-verifier", "security-reviewer"}
+            else "workspace-write"
+        )
+    try:
+        routing = build_routing_context(
+            runtime="codex",
+            role=role,
+            model_candidate=candidate.model,
+            model_snapshot=f"{candidate.model}@{candidate.reasoning_effort}",
+            complexity=complexity,
+            escalation_reason=escalation_reason,
+            permission_profile=permission_profile,
+            claim={"case_id": case_id, "role": role},
+        )
+    except ValueError as exc:
+        raise ReceiptError("routing context is invalid") from exc
     return {
         "version": 2,
         "status": "NATIVE_OK",
@@ -777,6 +1183,7 @@ def build_binding_receipt(role: str, candidate: Candidate, *, case_id: str = "dr
         ],
         "child_count": 1,
         "fork_turns": "none",
+        "routing": routing,
     }
 
 
@@ -1081,8 +1488,14 @@ def temporary_trial_home(
     auth_source: Path | None = None,
     parent_dir: Path | None = None,
     permanent_home: Path | None = None,
+    native_v2_compat: bool = False,
 ) -> Iterator[TrialHome]:
-    """Materialize a private trial home and remove it (including auth) on exit."""
+    """Materialize a private trial home and remove it (including auth) on exit.
+
+    The compatibility config is restricted to live benchmark homes because the
+    installed Codex 0.153+ CLI rejects the repository's production-era root
+    concurrency key in strict mode. Production templates remain unchanged.
+    """
 
     if role not in ROLE_NAMES:
         raise BenchmarkError("unknown role")
@@ -1100,7 +1513,11 @@ def temporary_trial_home(
     auth_path: Path | None = None
     before_permanent = snapshot_home(permanent_home) if permanent_home else None
     try:
-        config = (TEMPLATE_ROOT / "config.snippet.toml").read_bytes()
+        config = (
+            NATIVE_V2_BENCHMARK_CONFIG
+            if native_v2_compat
+            else (TEMPLATE_ROOT / "config.snippet.toml").read_bytes()
+        )
         policy = (TEMPLATE_ROOT / "agents-md.orchestration.md").read_bytes()
         _write_private(home / "config.toml", config)
         _write_private(home / "AGENTS.md", policy)
@@ -1224,7 +1641,7 @@ def build_case_prompt(case: Mapping[str, Any], workspace: Path) -> str:
         "Call spawn_agent exactly once with "
         f"message='{child_message}', agent_type='{role}', "
         f"task_name='{task_name}', fork_turns='none'. "
-        "Then call wait_agent exactly once with timeout_ms=30000 so the child "
+        f"Then call wait_agent exactly once with timeout_ms={BENCHMARK_WAIT_TIMEOUT_MS} so the child "
         f"can complete in workspace {workspace}. Do not use an untyped fallback, "
         "a second spawn, or any child override."
     )
@@ -1321,6 +1738,7 @@ def parse_native_dispatch_receipt(
         stdout,
         RoleBinding(candidate.model, candidate.reasoning_effort),
         role,
+        expected_wait_timeout_ms=BENCHMARK_WAIT_TIMEOUT_MS,
     )
     if not boundary or observed is None:
         raise ReceiptError("native dispatch evidence unavailable")
@@ -1348,6 +1766,7 @@ def locate_native_parent_child_rollouts(home: Path, stdout: str) -> tuple[Path, 
         from verify_dispatch import (
             EvidenceError,
             child_thread_from_parent,
+            child_rollouts_for_parent,
             load_jsonl,
             locate_rollout,
             parse_exec_thread_id,
@@ -1355,7 +1774,14 @@ def locate_native_parent_child_rollouts(home: Path, stdout: str) -> tuple[Path, 
         sessions_root = home / "sessions"
         parent_id = parse_exec_thread_id(stdout)
         parent_rollout = locate_rollout(sessions_root, parent_id)
-        child_id = child_thread_from_parent(load_jsonl(parent_rollout))
+        parent_events = load_jsonl(parent_rollout)
+        try:
+            child_id = child_thread_from_parent(parent_events)
+        except EvidenceError:
+            linked_children = child_rollouts_for_parent(sessions_root, parent_id)
+            if len(linked_children) != 1:
+                raise
+            child_id = next(iter(linked_children))
         child_rollout = locate_rollout(sessions_root, child_id)
     except (ImportError, EvidenceError) as exc:
         raise MetricsUnavailable("native rollout binding evidence is unavailable") from exc
@@ -1383,6 +1809,7 @@ def run_live_trial(
         candidate,
         auth_source=auth_source,
         permanent_home=permanent_home,
+        native_v2_compat=True,
     ) as trial:
         workspace_context = (
             disposable_case_workspace(fixture_path)
@@ -1737,6 +2164,7 @@ def enforce_live_gates(
     yes: bool,
     benchmark_yes: bool,
     trials: int,
+    max_cost_usd: float = DEFAULT_LIVE_MAX_COST_USD,
     environ: Mapping[str, str] | None = None,
 ) -> None:
     if not live:
@@ -1746,8 +2174,8 @@ def enforce_live_gates(
     env = os.environ if environ is None else environ
     if env.get("CI", "").lower() not in {"", "0", "false", "no"}:
         raise BenchmarkError("live mode is refused in CI")
-    if trials != TRIAL_CAP:
-        raise BenchmarkError(f"live mode requires exactly {TRIAL_CAP} trials")
+    _validate_live_trial_count(trials)
+    _validate_live_budget(max_cost_usd)
 
 
 def validate_live_codex_binary(executable: str) -> None:
@@ -1791,29 +2219,53 @@ def run_live(
     environ: Mapping[str, str] | None = None,
     codex_executable: str = "codex",
     checkpoint_path: Path | None = None,
+    max_cost_usd: float = DEFAULT_LIVE_MAX_COST_USD,
 ) -> dict[str, Any]:
-    """Run the bounded 12-case/three-candidate live matrix."""
+    """Run a balanced live matrix with a sparse default and a cost circuit breaker."""
 
     enforce_live_gates(
         live=True,
         yes=yes,
         benchmark_yes=benchmark_yes,
         trials=trials,
+        max_cost_usd=max_cost_usd,
         environ=environ,
     )
     if auth_source is None:
         raise BenchmarkError("live mode requires explicit --auth-source")
-    if trials != TRIAL_CAP:
-        raise BenchmarkError(f"live mode requires exactly {TRIAL_CAP} trials")
-    validate_live_codex_binary(codex_executable)
+    max_cost = _validate_live_budget(max_cost_usd)
     manifest = load_manifest()
+    matrix = select_live_matrix(manifest, trials)
+    estimated_cost = estimate_live_cost(matrix)
+    budget = live_budget_summary(
+        matrix,
+        trials=trials,
+        max_cost_usd=max_cost,
+    )
+    if estimated_cost > max_cost:
+        if checkpoint_path is not None:
+            write_checkpoint_report(
+                checkpoint_path,
+                {
+                    "version": MANIFEST_VERSION,
+                    "status": "failed",
+                    "trials": [],
+                    "recommendation": None,
+                    "budget": budget,
+                    "failure": {
+                        "reason_code": "preflight_budget_exceeded",
+                        "reason": "estimated live cost exceeds max-cost-usd",
+                    },
+                },
+            )
+        raise BenchmarkError(
+            "estimated live cost exceeds --max-cost-usd; lower trials or raise the explicit cap"
+        )
+    validate_live_codex_binary(codex_executable)
     rows: list[dict[str, Any]] = []
-    # Trial order is stable: each case receives Luna, Terra, then Sol.
-    matrix: list[tuple[Mapping[str, Any], Candidate]] = []
-    for case in manifest["cases"]:
-        cohort = str(case["cohort"])
-        matrix.extend((case, candidate) for candidate in CANDIDATES[cohort])
-    for case, candidate in matrix[:trials]:
+    # Trial order is stable: selected routine cases, then judgment cases; each
+    # case receives Luna, Terra, then Sol as one matched unit.
+    for case, candidate in matrix:
         role = str(case["role"])
         prompt = PARENT_PROMPT.replace("ROLE", role) + "\nTask: " + str(case["prompt"])
         try:
@@ -1836,6 +2288,12 @@ def run_live(
                         "status": "failed",
                         "trials": rows,
                         "recommendation": None,
+                        "budget": live_budget_summary(
+                            matrix,
+                            trials=trials,
+                            max_cost_usd=max_cost,
+                            observed_cost_usd=observed_live_cost(rows),
+                        ),
                         "failure": {
                             "case_id": str(case["id"]),
                             "candidate": candidate.as_dict(),
@@ -1845,6 +2303,57 @@ def run_live(
                 )
             raise BenchmarkError(f"live trial failed for {case['id']}: {exc}") from None
         rows.append({"case_id": case["id"], "candidate": candidate.as_dict(), **evidence})
+        try:
+            observed_cost = observed_live_cost(rows)
+        except BenchmarkError as exc:
+            if checkpoint_path is not None:
+                write_checkpoint_report(
+                    checkpoint_path,
+                    {
+                        "version": MANIFEST_VERSION,
+                        "status": "failed",
+                        "trials": rows,
+                        "recommendation": None,
+                        "budget": live_budget_summary(
+                            matrix,
+                            trials=trials,
+                            max_cost_usd=max_cost,
+                        ),
+                        "failure": {
+                            "case_id": str(case["id"]),
+                            "candidate": candidate.as_dict(),
+                            "reason": str(exc),
+                        },
+                    },
+                )
+            raise
+        budget = live_budget_summary(
+            matrix,
+            trials=trials,
+            max_cost_usd=max_cost,
+            observed_cost_usd=observed_cost,
+        )
+        if observed_cost > max_cost:
+            if checkpoint_path is not None:
+                write_checkpoint_report(
+                    checkpoint_path,
+                    {
+                        "version": MANIFEST_VERSION,
+                        "status": "failed",
+                        "trials": rows,
+                        "recommendation": None,
+                        "budget": budget,
+                        "failure": {
+                            "case_id": str(case["id"]),
+                            "candidate": candidate.as_dict(),
+                            "reason_code": "observed_budget_exceeded",
+                            "reason": "observed native cost exceeds max-cost-usd",
+                        },
+                    },
+                )
+            raise BenchmarkError(
+                f"observed live cost exceeded --max-cost-usd after {case['id']}"
+            )
         if checkpoint_path is not None:
             write_checkpoint_report(
                 checkpoint_path,
@@ -1853,9 +2362,15 @@ def run_live(
                     "status": "running",
                     "trials": rows,
                     "recommendation": None,
+                    "budget": budget,
                 },
             )
-    return {"version": MANIFEST_VERSION, "trials": rows, "recommendation": None}
+    return {
+        "version": MANIFEST_VERSION,
+        "trials": rows,
+        "recommendation": None,
+        "budget": budget,
+    }
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -1867,7 +2382,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--fixture", type=Path)
     parser.add_argument("--yes", action="store_true")
     parser.add_argument("--benchmark-yes", action="store_true")
-    parser.add_argument("--trials", type=int, default=TRIAL_CAP)
+    parser.add_argument("--trials", type=int, default=DEFAULT_TRIALS)
+    parser.add_argument("--max-cost-usd", type=float, default=DEFAULT_LIVE_MAX_COST_USD)
     parser.add_argument("--auth-source", type=Path)
     parser.add_argument("--codex-bin", default="codex")
     parser.add_argument("--output", type=Path)
@@ -1891,11 +2407,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             yes=args.yes,
             benchmark_yes=args.benchmark_yes,
             trials=args.trials,
+            max_cost_usd=args.max_cost_usd,
         )
         if args.dry_run:
+            dry_manifest = load_manifest()
+            dry_matrix = select_live_matrix(dry_manifest, args.trials)
             payload = {
                 "version": MANIFEST_VERSION,
                 "receipts": build_dry_run_receipts(),
+                "candidate_projection": candidate_projection(),
+                "live_budget": live_budget_summary(
+                    dry_matrix,
+                    trials=args.trials,
+                    max_cost_usd=args.max_cost_usd,
+                ),
                 "network": False,
             }
             if args.output is not None:
@@ -1913,6 +2438,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             benchmark_yes=args.benchmark_yes,
             codex_executable=args.codex_bin,
             checkpoint_path=checkpoint_path,
+            max_cost_usd=args.max_cost_usd,
         )
         if args.output is not None:
             write_result_report(args.output, payload)

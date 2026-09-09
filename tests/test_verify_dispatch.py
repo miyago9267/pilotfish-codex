@@ -38,14 +38,18 @@ CALL = "call-1"
 WAIT_CALL = "wait-1"
 
 
-def parent_events(arguments: dict | None = None, version: str = "v2") -> list[dict]:
+def parent_events(
+    arguments: dict | None = None,
+    version: str = "v2",
+    wait_timeout_ms: int = 30000,
+) -> list[dict]:
     arguments = arguments or {"message": "ready", "agent_type": "scout", "task_name": "model_probe_scout", "fork_turns": "none"}
     return [
         {"type": "session_meta", "payload": {"id": PARENT}},
         {"type": "turn_context", "payload": {"model": "gpt-5.6-terra", "effort": "low", "multi_agent_version": version}},
         {"type": "response_item", "payload": {"type": "function_call", "name": "spawn_agent", "namespace": "any-upstream-value", "call_id": CALL, "arguments": json.dumps(arguments)}},
         {"type": "event_msg", "payload": {"type": "sub_agent_activity", "kind": "started", "event_id": CALL, "agent_thread_id": CHILD}},
-        {"type": "response_item", "payload": {"type": "function_call", "name": "wait_agent", "call_id": WAIT_CALL, "arguments": json.dumps({"timeout_ms": 30000})}},
+        {"type": "response_item", "payload": {"type": "function_call", "name": "wait_agent", "call_id": WAIT_CALL, "arguments": json.dumps({"timeout_ms": wait_timeout_ms})}},
     ]
 
 
@@ -422,6 +426,45 @@ class NativeEvidenceTests(unittest.TestCase):
     def test_current_custom_tool_transport_is_native_ok(self) -> None:
         verdict = inspect_dispatch(custom_transport_parent_events(), child_events(), expected_role=self.binding)
         self.assertEqual((verdict.status, verdict.reason_code, verdict.child_created), ("NATIVE_OK", "native_verified", "yes"))
+
+    def test_benchmark_wait_timeout_accepts_delayed_child_only_when_explicit(self) -> None:
+        delayed = parent_events(wait_timeout_ms=120_000)
+        accepted = inspect_dispatch(
+            delayed,
+            child_events(),
+            expected_role=self.binding,
+            expected_wait_timeout_ms=120_000,
+        )
+        self.assertEqual((accepted.status, accepted.reason_code), ("NATIVE_OK", "native_verified"))
+        rejected = inspect_dispatch(delayed, child_events(), expected_role=self.binding)
+        self.assertEqual((rejected.status, rejected.reason_code), ("FAILED", "policy_violation"))
+
+    def test_session_metadata_links_child_when_runtime_omits_spawn_activity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            sessions = home / "sessions"
+            sessions.mkdir()
+            parent = parent_events()
+            parent.pop(3)
+            (sessions / f"rollout-{PARENT}.jsonl").write_text(
+                "\n".join(json.dumps(event) for event in parent) + "\n",
+                encoding="utf-8",
+            )
+            (sessions / f"rollout-{CHILD}.jsonl").write_text(
+                "\n".join(json.dumps(event) for event in child_events()) + "\n",
+                encoding="utf-8",
+            )
+            verdict, boundary = verify_dispatch.inspect_available_evidence(
+                home,
+                json.dumps({"type": "thread.started", "thread_id": PARENT}),
+                self.binding,
+                "scout",
+            )
+
+        self.assertTrue(boundary)
+        self.assertIsNotNone(verdict)
+        self.assertEqual((verdict.status, verdict.reason_code), ("NATIVE_OK", "native_verified"))
+        self.assertEqual(verdict.correlation_mode, "session_metadata")
 
     def test_undocumented_multi_agent_marker_is_optional(self) -> None:
         events = parent_events()

@@ -33,6 +33,8 @@ work:
 - `plan-verifier`: challenge a material Plan before approval.
 - `executor`: bounded implementation requiring local judgment.
 - `mech-executor`: fully specified mechanical repetition with exclusive ownership.
+- `mech-executor` and `scout` are baseline-only Luna roles; never pass an Astra
+  override. Route work beyond either boundary to `executor` or `verifier`.
 - `security-reviewer`: pre-approval security evidence.
 - `security-executor`: approved security-sensitive implementation.
 - `verifier`: fresh-context falsification after primary acceptance.

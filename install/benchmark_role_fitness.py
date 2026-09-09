@@ -23,17 +23,44 @@ from validate_agents import ROLES, validate_agent
 from verify_dispatch import validate_receipt
 
 
+class BenchmarkContractError(ValueError):
+    """A dry-run input violates the fail-closed benchmark contract."""
+
+
 VERSION = "role-fitness-v1"
 SCORECARD_VERSION = "operational-v1"
-EXPECTED_BINDINGS = {
-    "scout": ("gpt-5.6-luna", "low"),
-    "mech-executor": ("gpt-5.6-luna", "medium"),
-    "executor": ("gpt-5.6-luna", "max"),
-    "verifier": ("gpt-5.6-luna", "xhigh"),
-    "plan-verifier": ("gpt-5.6-sol", "high"),
-    "security-reviewer": ("gpt-5.6-sol", "high"),
-    "security-executor": ("gpt-5.6-sol", "high"),
-}
+ROLE_TEMPLATE_ROOT = Path(__file__).resolve().parents[1] / "templates" / "agents"
+
+
+def load_expected_bindings(agent_root: Path = ROLE_TEMPLATE_ROOT) -> dict[str, tuple[str, str]]:
+    """Read benchmark bindings from the canonical role TOMLs.
+
+    Keeping the benchmark projection derived from the manifest prevents a
+    template-only model change from silently measuring an old binding.
+    """
+    if not agent_root.is_dir() or agent_root.is_symlink():
+        raise BenchmarkContractError("role template root is invalid")
+    bindings: dict[str, tuple[str, str]] = {}
+    for path in sorted(agent_root.glob("*.toml")):
+        try:
+            data = tomllib.loads(path.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            raise BenchmarkContractError(f"role template cannot be read: {path.name}") from exc
+        errors = validate_agent(data)
+        name = data.get("name")
+        model = data.get("model")
+        effort = data.get("model_reasoning_effort")
+        if errors or name != path.stem or not isinstance(model, str) or not isinstance(effort, str):
+            raise BenchmarkContractError(f"role template binding is invalid: {path.name}")
+        if name in bindings:
+            raise BenchmarkContractError(f"duplicate role template: {name}")
+        bindings[name] = (model, effort)
+    if set(bindings) != set(ROLES):
+        raise BenchmarkContractError("role template manifest is incomplete")
+    return bindings
+
+
+EXPECTED_BINDINGS = load_expected_bindings()
 COHORTS = {
     "plan_review": {"cases": 12, "arms": 24, "stages": 1},
     "mechanical_execution": {"cases": 12, "arms": 24, "stages": 2},
@@ -79,14 +106,11 @@ FAILURE_CLASSES = frozenset({
     "native_spawn",
     "execution",
     "preflight",
+    "capability_gap",
 })
 STAGE_KEYS = frozenset(
     {"stage_id", "status", "phase", "reason_code", "admitted", "passed", "failure_class"}
 )
-
-
-class BenchmarkContractError(ValueError):
-    """A dry-run input violates the fail-closed benchmark contract."""
 
 
 def fixture_commitment(
@@ -210,6 +234,8 @@ def validate_resource_admission(*, arms: int, paid_processes: int, wall_seconds:
 def _failure_class(status: str, reason_code: str, phase: str) -> str:
     if status == "NATIVE_OK":
         return "none"
+    if reason_code == "platform_halt":
+        return "capability_gap"
     if phase == "preflight":
         return "auth" if reason_code == "auth_unavailable" else "preflight"
     if reason_code in {"codex_exec_failed", "codex_exec_failed_after_spawn"}:
@@ -334,13 +360,14 @@ def validate_role_bindings(role_root: Path) -> dict[str, dict[str, Any]]:
     """Validate exactly the installed roles and their expected bindings."""
     if not role_root.is_dir() or role_root.is_symlink():
         raise BenchmarkContractError("role root must be a real directory")
-    expected_names = set(EXPECTED_BINDINGS)
+    expected_bindings = load_expected_bindings()
+    expected_names = set(expected_bindings)
     actual_names = {path.stem for path in role_root.glob("*.toml")}
     if actual_names != expected_names or actual_names != set(ROLES):
         raise BenchmarkContractError("role manifest is incomplete or has extras")
 
     result: dict[str, dict[str, Any]] = {}
-    for role, (expected_model, expected_effort) in EXPECTED_BINDINGS.items():
+    for role, (expected_model, expected_effort) in expected_bindings.items():
         path = role_root / f"{role}.toml"
         if path.is_symlink() or not path.is_file():
             raise BenchmarkContractError(f"role file is invalid: {role}")

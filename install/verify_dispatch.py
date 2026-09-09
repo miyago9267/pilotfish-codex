@@ -20,7 +20,7 @@ import tempfile
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable, Mapping
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from install import codex_version_token, parse_codex_version
@@ -32,6 +32,12 @@ from stage_smoke_home import (
     _state_policy_digest,
     explicit_layout_error,
     project_config_bytes,
+)
+from routing_contract import (
+    UNKNOWN_MODEL,
+    UNKNOWN_SNAPSHOT,
+    build_routing_context,
+    validate_routing_context,
 )
 
 TASK_NAME = "model_probe"
@@ -53,7 +59,7 @@ RECEIPT_KEYS = frozenset({
     "active_config_sha256", "active_role_manifest_sha256", "active_policy_sha256",
     "target_config_sha256", "target_role_manifest_sha256", "target_policy_sha256",
     "role", "task_name", "fork_turns", "parent_ref", "child_ref", "model",
-    "reasoning_effort", "sandbox", "correlation_mode",
+    "reasoning_effort", "sandbox", "correlation_mode", "routing", "platform_halt",
 })
 MATRIX = {
     ("preflight", "live_flag_required", "SKIPPED"), ("preflight", "operator_opt_in_required", "SKIPPED"),
@@ -69,13 +75,16 @@ MATRIX = {
     ("preflight", "environment_binding_mismatch", "FAILED"),
     ("execution-pre-child", "snapshot_mutated", "FAILED"), ("execution-pre-child", "parent_model_unavailable", "SKIPPED"),
     ("execution-pre-child", "codex_exec_failed", "FAILED"),
+    ("execution-pre-child", "platform_halt", "SKIPPED"),
     ("post-spawn", "parent_model_unavailable_after_spawn", "SKIPPED"), ("post-spawn", "snapshot_mutated", "FAILED"),
     ("post-spawn", "codex_exec_failed_after_spawn", "FAILED"), ("post-spawn", "native_v2_selection_unobservable", "SKIPPED"),
     ("post-spawn", "native_v2_selection_mismatch", "FAILED"), ("post-spawn", "native_spawn_evidence_missing", "SKIPPED"),
     ("post-spawn", "autoroute_prompt_missing", "FAILED"), ("post-spawn", "autoroute_prompt_directive_detected", "FAILED"),
     ("post-spawn", "autoroute_plan_verifier_missing", "FAILED"),
+    ("post-spawn", "platform_halt", "SKIPPED"),
     ("post-spawn", "policy_violation", "FAILED"),
     ("post-spawn", "untyped_fallback_detected", "FAILED"), ("dispatch", "policy_violation", "FAILED"),
+    ("dispatch", "platform_halt", "SKIPPED"),
     ("dispatch", "service_tier_override_forbidden", "FAILED"), ("post-spawn", "parent_child_mismatch", "FAILED"),
     ("post-spawn", "child_evidence_missing", "SKIPPED"), ("post-spawn", "child_binding_unobservable", "SKIPPED"),
     ("post-spawn", "child_binding_mismatch", "FAILED"), ("post-spawn", "child_model_mismatch", "FAILED"),
@@ -98,6 +107,35 @@ class RoleBinding:
     effort: str
 
 
+PLATFORM_HALT_EVENT_TYPES = frozenset({"safety_check_failed", "platform_halt"})
+
+
+def platform_halt_detected(*outputs: str) -> bool:
+    """Recognize only structured platform-stop events from Codex output."""
+    for output in outputs:
+        if not isinstance(output, str):
+            continue
+        for line in output.splitlines():
+            try:
+                event = json.loads(line)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(event, dict):
+                continue
+            payload = event.get("payload") if isinstance(event.get("payload"), dict) else event
+            event_type = payload.get("type")
+            if event_type in PLATFORM_HALT_EVENT_TYPES:
+                return True
+            if (
+                event_type in {"task_stopped", "turn_aborted"}
+                and payload.get("reason") in {"safety_check", "platform_safety"}
+            ):
+                return True
+            if payload.get("status") == "platform_halt" and payload.get("reason") == "safety_check":
+                return True
+    return False
+
+
 @dataclass(frozen=True)
 class Verdict:
     status: str
@@ -112,10 +150,38 @@ class Verdict:
     model: str | None = None
     reasoning_effort: str | None = None
     correlation_mode: str | None = None
+    platform_halt: str = "none"
 
 
 def _verdict(status: str, reason_code: str, *, phase: str = "post-spawn", child_created: str = "unknown", **values: str | None) -> Verdict:
     return Verdict(status, reason_code, phase, child_created, **values)
+
+
+def _platform_halt_verdict(*, phase: str, observed: Verdict | None) -> Verdict:
+    """Preserve observed binding metadata while classifying a platform stop."""
+    values: dict[str, str | None] = {}
+    if observed is not None:
+        for field in (
+            "role",
+            "task_name",
+            "fork_turns",
+            "parent_ref",
+            "child_ref",
+            "model",
+            "reasoning_effort",
+            "correlation_mode",
+        ):
+            value = getattr(observed, field, None)
+            if value is not None:
+                values[field] = value
+    return _verdict(
+        "SKIPPED",
+        "platform_halt",
+        phase=phase,
+        child_created=observed.child_created if observed is not None else "unknown",
+        platform_halt="capability_gap",
+        **values,
+    )
 
 
 def _short_ref(value: str | None) -> str | None:
@@ -733,11 +799,43 @@ def _native_activities(events: Iterable[dict], calls: list[tuple[int, dict]]) ->
     return activities
 
 
-def inspect_dispatch(parent_events: list[dict], child_events: list[dict], *, expected_role: RoleBinding, expected_role_name: str = "scout", expected_task_name: str | None = None) -> Verdict:
+def inspect_dispatch(
+    parent_events: list[dict],
+    child_events: list[dict],
+    *,
+    expected_role: RoleBinding,
+    expected_role_name: str = "scout",
+    expected_task_name: str | None = None,
+    metadata_child_id: str | None = None,
+    expected_wait_timeout_ms: int = 30000,
+) -> Verdict:
     """Classify native evidence without using an adapter namespace predicate."""
+    if type(expected_wait_timeout_ms) is not int or expected_wait_timeout_ms <= 0:
+        return _verdict("FAILED", "policy_violation", phase="dispatch")
     task = expected_task_name or task_name_for_role(expected_role_name)
     if not _events_valid(parent_events, {"session_meta", "turn_context", "response_item", "event_msg"}):
         return _verdict("FAILED", "policy_violation", phase="dispatch")
+    if platform_halt_detected(
+        *(json.dumps(event, sort_keys=True) for event in (*parent_events, *child_events))
+    ):
+        phase = "post-spawn" if child_events else "dispatch"
+        contexts = _payloads(child_events, "turn_context")
+        context = contexts[0] if contexts else {}
+        values: dict[str, str | None] = {}
+        if child_events:
+            values = {
+                "role": expected_role_name,
+                "model": context.get("model") if isinstance(context.get("model"), str) else expected_role.model,
+                "reasoning_effort": context.get("effort") if isinstance(context.get("effort"), str) else expected_role.effort,
+            }
+        return _verdict(
+            "SKIPPED",
+            "platform_halt",
+            phase=phase,
+            child_created="yes" if child_events else "unknown",
+            platform_halt="capability_gap",
+            **values,
+        )
     function_calls = _native_calls(parent_events)
     calls = [
         (index, payload)
@@ -751,7 +849,7 @@ def inspect_dispatch(parent_events: list[dict], child_events: list[dict], *, exp
     ]
     untyped = [p for p in _payloads(parent_events, "response_item") if p.get("type") == "function_call" and p.get("name") != "spawn_agent" and "spawn" in str(p.get("name", ""))]
     activities = _native_activities(parent_events, function_calls)
-    created = "yes" if activities else "unknown"
+    created = "yes" if activities or metadata_child_id else "unknown"
     # The rollout marker is undocumented and optional.  If a runtime emits it,
     # an explicitly non-native value is still contradictory evidence.
     if untyped:
@@ -779,13 +877,20 @@ def inspect_dispatch(parent_events: list[dict], child_events: list[dict], *, exp
         wait_args = json.loads(wait_call.get("arguments", ""))
     except (TypeError, json.JSONDecodeError):
         return _verdict("FAILED", "policy_violation", phase="dispatch", child_created=created)
-    if wait_index <= call_index or wait_args.get("timeout_ms") != 30000 or set(wait_args) - {"timeout_ms", "targets"}:
+    if wait_index <= call_index or wait_args.get("timeout_ms") != expected_wait_timeout_ms or set(wait_args) - {"timeout_ms", "targets"}:
         return _verdict("FAILED", "policy_violation", phase="dispatch", child_created=created)
     call_id = call.get("call_id")
-    matched = [a for a in activities if a.get("event_id") == call_id]
-    if not isinstance(call_id, str) or not call_id or len(matched) != 1:
-        return _verdict("SKIPPED", "native_spawn_evidence_missing", child_created=created)
-    child_id = matched[0].get("agent_thread_id")
+    if metadata_child_id is not None:
+        if activities or not isinstance(metadata_child_id, str) or not metadata_child_id:
+            return _verdict("FAILED", "policy_violation", child_created=created)
+        child_id = metadata_child_id
+        correlation_mode = "session_metadata"
+    else:
+        matched = [a for a in activities if a.get("event_id") == call_id]
+        if not isinstance(call_id, str) or not call_id or len(matched) != 1:
+            return _verdict("SKIPPED", "native_spawn_evidence_missing", child_created=created)
+        child_id = matched[0].get("agent_thread_id")
+        correlation_mode = "spawn_activity"
     targets = wait_args.get("targets")
     if targets is not None and targets != [child_id]:
         return _verdict("FAILED", "parent_child_mismatch", child_created="yes")
@@ -808,7 +913,7 @@ def inspect_dispatch(parent_events: list[dict], child_events: list[dict], *, exp
     # The observed child binding is authoritative. A role may intentionally use
     # the same model and effort as its parent, which cannot be distinguished
     # from inheritance but is behaviorally equivalent to the installed role.
-    return _verdict("NATIVE_OK", "native_verified", child_created="yes", role=expected_role_name, task_name=task, fork_turns=args["fork_turns"], parent_ref=_short_ref(parent_id), child_ref=_short_ref(child_id), model=model, reasoning_effort=effort, correlation_mode="spawn_activity")
+    return _verdict("NATIVE_OK", "native_verified", child_created="yes", role=expected_role_name, task_name=task, fork_turns=args["fork_turns"], parent_ref=_short_ref(parent_id), child_ref=_short_ref(child_id), model=model, reasoning_effort=effort, correlation_mode=correlation_mode)
 
 
 def _user_message_texts(events: Iterable[dict]) -> list[str]:
@@ -1102,18 +1207,42 @@ def child_rollouts_for_parent(sessions_root: Path, parent_id: str) -> dict[str, 
     return matches
 
 
-def inspect_available_evidence(home: Path, stdout: str, binding: RoleBinding, role: str) -> tuple[Verdict | None, bool]:
+def inspect_available_evidence(
+    home: Path,
+    stdout: str,
+    binding: RoleBinding,
+    role: str,
+    *,
+    expected_wait_timeout_ms: int = 30000,
+) -> tuple[Verdict | None, bool]:
     """Inspect bounded rollout evidence and retain the spawn-attempt boundary."""
     try:
         parent_id = parse_exec_thread_id(stdout)
         parent_events = load_jsonl(locate_rollout(home / "sessions", parent_id))
-        boundary = any(p.get("name") == "spawn_agent" for _, p in _native_calls(parent_events))
+        function_calls = _native_calls(parent_events)
+        boundary = any(p.get("name") == "spawn_agent" for _, p in function_calls)
+        activities = _native_activities(parent_events, function_calls)
+        metadata_child_id: str | None = None
         try:
             child_id = child_thread_from_parent(parent_events)
             child_events = load_jsonl(locate_rollout(home / "sessions", child_id))
         except EvidenceError:
             child_events = []
-        return inspect_dispatch(parent_events, child_events, expected_role=binding, expected_role_name=role), boundary
+            if not activities:
+                try:
+                    linked_children = child_rollouts_for_parent(home / "sessions", parent_id)
+                except EvidenceError:
+                    linked_children = {}
+                if len(linked_children) == 1:
+                    metadata_child_id, child_events = next(iter(linked_children.items()))
+        return inspect_dispatch(
+            parent_events,
+            child_events,
+            expected_role=binding,
+            expected_role_name=role,
+            metadata_child_id=metadata_child_id,
+            expected_wait_timeout_ms=expected_wait_timeout_ms,
+        ), boundary
     except EvidenceError:
         return None, False
 
@@ -1170,17 +1299,80 @@ def run_autoroute_probe(
     observed, spawn_boundary = inspect_autoroute_available_evidence(codex_home, completed.stdout, binding)
     if snapshot_changed(codex_home, before):
         return _verdict("FAILED", "snapshot_mutated", phase="post-spawn" if spawn_boundary else "execution-pre-child", child_created=observed.child_created if observed else "unknown"), spawn_boundary
+    if platform_halt_detected(completed.stdout, getattr(completed, "stderr", "")):
+        return _platform_halt_verdict(
+            phase="post-spawn" if spawn_boundary else "execution-pre-child",
+            observed=observed,
+        ), spawn_boundary
     if completed.returncode:
         return _verdict("FAILED", "codex_exec_failed_after_spawn" if spawn_boundary else "codex_exec_failed", phase="post-spawn" if spawn_boundary else "execution-pre-child", child_created=observed.child_created if observed else "unknown"), spawn_boundary
     return observed or _verdict("SKIPPED", "native_spawn_evidence_missing"), spawn_boundary
 
 
-def receipt_payload(verdict: Verdict, *, codex_version: str, active: dict[str, str], target: dict[str, str]) -> dict:
+def receipt_payload(
+    verdict: Verdict,
+    *,
+    codex_version: str,
+    active: dict[str, str],
+    target: dict[str, str],
+    routing: Mapping[str, Any] | None = None,
+    complexity: str = "routine",
+    escalation_reason: str | None = None,
+    permission_profile: str | None = None,
+    expected_role: str | None = None,
+    expected_binding: RoleBinding | None = None,
+) -> dict:
+    if routing is None:
+        preserve_requested = verdict.reason_code == "platform_halt"
+        effective_role = verdict.role or (
+            expected_role if preserve_requested and expected_role else "unknown"
+        )
+        model = verdict.model or (
+            expected_binding.model if preserve_requested and expected_binding is not None else UNKNOWN_MODEL
+        )
+        effort = verdict.reasoning_effort or (
+            expected_binding.effort if preserve_requested and expected_binding is not None else None
+        )
+        snapshot = f"{model}@{effort}" if effort else UNKNOWN_SNAPSHOT
+        if escalation_reason is None:
+            escalation_reason = "explicit-risk" if effective_role == "plan-verifier" else "baseline"
+        if permission_profile is None:
+            permission_profile = (
+                "read-only"
+                if verdict.phase == "preflight"
+                or effective_role in {"scout", "plan-verifier", "security-reviewer"}
+                else "workspace-write"
+            )
+        try:
+            routing = build_routing_context(
+                runtime="codex",
+                role=effective_role,
+                model_candidate=model,
+                model_snapshot=snapshot,
+                complexity=complexity,
+                escalation_reason=escalation_reason,
+                permission_profile=permission_profile,
+                claim={
+                    "phase": verdict.phase,
+                    "reason_code": verdict.reason_code,
+                    "role": verdict.role,
+                    "task_name": verdict.task_name,
+                },
+            )
+        except ValueError as exc:
+            raise ReceiptError("routing context is invalid") from exc
+    else:
+        try:
+            validate_routing_context(routing)
+        except ValueError as exc:
+            raise ReceiptError("routing context is invalid") from exc
     payload = {
         "status": verdict.status, "reason_code": verdict.reason_code, "phase": verdict.phase,
         "child_created": verdict.child_created, "codex_version": codex_version,
         "active_config_sha256": active["config"], "active_role_manifest_sha256": active["role_manifest"], "active_policy_sha256": active["policy"],
         "target_config_sha256": target["config"], "target_role_manifest_sha256": target["role_manifest"], "target_policy_sha256": target["policy"],
+        "routing": dict(routing),
+        "platform_halt": verdict.platform_halt,
     }
     for key in ("role", "task_name", "fork_turns", "parent_ref", "child_ref", "model", "reasoning_effort", "correlation_mode"):
         value = getattr(verdict, key)
@@ -1192,13 +1384,35 @@ def receipt_payload(verdict: Verdict, *, codex_version: str, active: dict[str, s
 def validate_receipt(payload: dict) -> None:
     required = {"status", "reason_code", "phase", "child_created", "codex_version",
                 "active_config_sha256", "active_role_manifest_sha256", "active_policy_sha256",
-                "target_config_sha256", "target_role_manifest_sha256", "target_policy_sha256"}
+                "target_config_sha256", "target_role_manifest_sha256", "target_policy_sha256",
+                "routing", "platform_halt"}
     if not isinstance(payload, dict) or not required <= set(payload) or set(payload) - RECEIPT_KEYS:
         raise ReceiptError("receipt keys are invalid")
     if (payload["phase"], payload["reason_code"], payload["status"]) not in MATRIX:
         raise ReceiptError("receipt reason matrix row is invalid")
     if payload["child_created"] not in {"no", "yes", "unknown"}:
         raise ReceiptError("receipt child_created is invalid")
+    if payload["platform_halt"] not in {"none", "capability_gap"}:
+        raise ReceiptError("receipt platform halt state is invalid")
+    try:
+        validate_routing_context(payload["routing"])
+    except (TypeError, ValueError) as exc:
+        raise ReceiptError("receipt routing context is invalid") from exc
+    if payload["reason_code"] == "platform_halt" and payload["platform_halt"] != "capability_gap":
+        raise ReceiptError("platform halt reason lacks capability gap state")
+    if payload["platform_halt"] == "capability_gap" and payload["reason_code"] != "platform_halt":
+        raise ReceiptError("capability gap state lacks platform halt reason")
+    if payload["platform_halt"] == "capability_gap" and payload["status"] == "NATIVE_OK":
+        raise ReceiptError("platform halt cannot be a native success")
+    routing = payload["routing"]
+    if "role" in payload and routing["role"] != payload["role"]:
+        raise ReceiptError("receipt routing role mismatch")
+    if "model" in payload and routing["model_candidate"] != payload["model"]:
+        raise ReceiptError("receipt routing model mismatch")
+    if "model" in payload and "reasoning_effort" in payload:
+        expected_snapshot = f"{payload['model']}@{payload['reasoning_effort']}"
+        if routing["model_snapshot"] != expected_snapshot:
+            raise ReceiptError("receipt routing snapshot mismatch")
     version = payload["codex_version"]
     if version != "unknown" and not re.fullmatch(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?", str(version)):
         raise ReceiptError("receipt version is invalid")
@@ -1379,7 +1593,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.launch_capture is None:
         verdict = _verdict("SKIPPED", "environment_binding_unobservable", phase="preflight", child_created="no")
         try:
-            write_receipt(destination, receipt_payload(verdict, codex_version="unknown", active=active_hash, target=target_hash))
+            write_receipt(
+                destination,
+                receipt_payload(
+                    verdict,
+                    codex_version="unknown",
+                    active=active_hash,
+                    target=target_hash,
+                    expected_role=args.role,
+                    expected_binding=binding,
+                ),
+            )
         except ReceiptError:
             print("receipt_write_failed", file=sys.stderr); return 1
         _print(verdict); return 2
@@ -1388,7 +1612,17 @@ def main(argv: list[str] | None = None) -> int:
         expected = {"CODEX_HOME": str(args.codex_home), "CODEX_SQLITE_HOME": str(args.codex_home), "codex_cwd": str(args.codex_cwd)}
         if not isinstance(capture, dict) or any(capture.get(key) != value for key, value in expected.items()):
             verdict = _verdict("FAILED", "environment_binding_mismatch", phase="preflight", child_created="no")
-            write_receipt(destination, receipt_payload(verdict, codex_version="unknown", active=active_hash, target=target_hash))
+            write_receipt(
+                destination,
+                receipt_payload(
+                    verdict,
+                    codex_version="unknown",
+                    active=active_hash,
+                    target=target_hash,
+                    expected_role=args.role,
+                    expected_binding=binding,
+                ),
+            )
             _print(verdict); return 1
     except (OSError, json.JSONDecodeError, ReceiptError):
         print("environment_binding_unobservable", file=sys.stderr); return 2
@@ -1413,7 +1647,14 @@ def main(argv: list[str] | None = None) -> int:
             env = {"CODEX_HOME": str(args.codex_home), "CODEX_SQLITE_HOME": str(args.codex_home), **{k: v for k, v in os.environ.items() if k not in {"CODEX_HOME", "CODEX_SQLITE_HOME"}}}
             if env.get("CODEX_HOME") != str(args.codex_home) or env.get("CODEX_SQLITE_HOME") != str(args.codex_home):
                 verdict = _verdict("FAILED", "environment_propagation_failed", phase="preflight", child_created="no")
-                payload = receipt_payload(verdict, codex_version=version_text or "unknown", active=active_hash, target=target_hash)
+                payload = receipt_payload(
+                    verdict,
+                    codex_version=version_text or "unknown",
+                    active=active_hash,
+                    target=target_hash,
+                    expected_role=args.role,
+                    expected_binding=binding,
+                )
                 write_receipt(destination, payload)
                 _print(verdict)
                 return 1
@@ -1430,7 +1671,12 @@ def main(argv: list[str] | None = None) -> int:
                 completed = subprocess.run(command, capture_output=True, text=True, stdin=subprocess.DEVNULL, env=env, check=False)
                 changed = snapshot_changed(args.codex_home, before)
                 observed, spawn_boundary = inspect_available_evidence(args.codex_home, completed.stdout, binding, args.role)
-                if completed.returncode:
+                if platform_halt_detected(completed.stdout, completed.stderr):
+                    verdict = _platform_halt_verdict(
+                        phase="post-spawn" if spawn_boundary else "execution-pre-child",
+                        observed=observed,
+                    )
+                elif completed.returncode:
                     if spawn_boundary:
                         child_state = observed.child_created if observed is not None else "unknown"
                         verdict = _verdict("FAILED", "codex_exec_failed_after_spawn", phase="post-spawn", child_created=child_state)
@@ -1444,7 +1690,14 @@ def main(argv: list[str] | None = None) -> int:
                     verdict = _verdict("FAILED", "snapshot_mutated", phase=phase, child_created=verdict.child_created)
     version_text = version_text or "unknown"
     try:
-        payload = receipt_payload(verdict, codex_version=version_text, active=active_hash, target=target_hash)
+        payload = receipt_payload(
+            verdict,
+            codex_version=version_text,
+            active=active_hash,
+            target=target_hash,
+            expected_role=args.role,
+            expected_binding=binding,
+        )
         write_receipt(destination, payload)
     except ReceiptError:
         print("receipt_write_failed", file=sys.stderr); return 1

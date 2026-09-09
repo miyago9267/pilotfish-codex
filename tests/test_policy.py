@@ -43,6 +43,14 @@ class PolicyTests(unittest.TestCase):
         ):
             self.assertIn(phrase, policy)
 
+    def test_policy_keeps_mechanical_roles_on_the_luna_baseline(self) -> None:
+        policy = " ".join(
+            (ROOT / "templates" / "agents-md.orchestration.md").read_text(encoding="utf-8").split()
+        )
+        self.assertIn("`mech-executor` and `scout` are baseline-only", policy)
+        self.assertIn("never request Astra", policy)
+        self.assertIn("route to `executor` or `verifier`", policy)
+
     def test_policy_defines_general_mode_decision_checkpoint_contract(self) -> None:
         policy = " ".join(
             (ROOT / "templates" / "agents-md.orchestration.md").read_text(encoding="utf-8").split()

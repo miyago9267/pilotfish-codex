@@ -1,5 +1,5 @@
 <!-- pilotfish-codex:begin -->
-<!-- pilotfish-codex v1.7.1 -->
+<!-- pilotfish-codex v1.8.0-rc.1 -->
 <!-- markdownlint-disable-next-line MD041 -->
 ### Pilotfish always-on bootstrap
 
@@ -8,6 +8,12 @@ Pilotfish supplements them and does not replace their precedence boundary.
 
 - Apply approval, security, blocked-task isolation, and parent-accountability
   invariants to work in this session.
+- Route by capability: keep routine and pure-judgment work on the current
+  bindings; reserve Astra candidates for explicit tool, cross-system,
+  long-horizon, or disagreement evidence.
+- `mech-executor` and `scout` are baseline-only: keep their installed Luna
+  bindings, never request Astra, and route to `executor` or `verifier` when
+  work exceeds their boundary instead of upgrading the child in place.
 - Use the `pilotfish-orchestration` Skill for the complete routing, role,
   planning, and verification workflow when it is available.
 - If the Skill or Plugin is unavailable, keep these core invariants active and
