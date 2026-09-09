@@ -33,6 +33,8 @@ native runtime、policy ownership、transaction、migration 與 fresh-session pr
   已全綠；rc.2 pre-release 使用修正版 commit。
 - [x] `v1.8.0-rc.2` annotated tag 已指向 `5c4b0b6` 並推送；Python CI
   `34333148355` 與 Markdown CI `34333148451` 均通過。
+- [x] GitHub pre-release 已建立：
+  <https://github.com/miyago9267/pilotfish-codex/releases/tag/v1.8.0-rc.2>。
 
 ## Completed
 
@@ -149,8 +151,8 @@ native runtime、policy ownership、transaction、migration 與 fresh-session pr
 
 ## Next smallest action
 
-建立 GitHub pre-release（來源為已驗證的 `v1.8.0-rc.2` tag）。既有
-`v1.8.0-rc.1` tag 保持 immutable；付費 Astra cohort、正式
+等待 `v1.8.0-rc.2` pre-release 使用回饋；既有 `v1.8.0-rc.1` tag
+保持 immutable。付費 Astra cohort、正式
 promotion 與 stable release 不在此步驟內。
 
 ## Historical release record
