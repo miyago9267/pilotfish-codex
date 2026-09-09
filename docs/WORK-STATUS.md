@@ -25,10 +25,13 @@ native runtime、policy ownership、transaction、migration 與 fresh-session pr
 - [x] installer state v4 reconciliation、symlink identity、TOCTOU、rollback
   manifest 與 plugin downgrade guard 通過獨立 verifier。
 - [x] repo 版本、manifest、policy marker、changelog 已同步至
-  `1.8.0-rc.1`；尚未 push 或建立 tag。
+  `1.8.0-rc.1`；`main` 與 immutable annotated tag `v1.8.0-rc.1` 已推送。
 - [x] 依 user approval 將 RC 安裝至全域 `/Users/miyago/.codex`，保留現行
   canonical policy 與 role drift 邊界；state v4 為 `integrated`、Plugin
   `1.8.0-rc.1`，pending sidecar 不存在。
+- [ ] GitHub pre-release 暫停：Windows CI 在 rollback backup 的 CRLF byte
+  preservation 失敗；修正 `O_BINARY` 後需重跑完整 matrix。既有 `rc.1` tag
+  不移動，避免覆寫遠端 release pointer。
 
 ## Completed
 
@@ -145,8 +148,8 @@ native runtime、policy ownership、transaction、migration 與 fresh-session pr
 
 ## Next smallest action
 
-`v1.8.0-rc.1` 已完成 repo 變更與全域安裝；目前應建立 commit、annotated tag，
-推送 `main` 與 RC tag，再建立 GitHub pre-release。付費 Astra cohort、正式
+修正 Windows rollback byte path，重跑完整 CI matrix；CI 通過後再建立 GitHub
+pre-release。既有 `v1.8.0-rc.1` tag 保持 immutable；付費 Astra cohort、正式
 promotion 與 stable release 不在此步驟內。
 
 ## Historical release record

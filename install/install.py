@@ -1378,11 +1378,12 @@ def _copy_backup_no_follow(
 ) -> None:
     """Create a rollback copy without following a raced backup symlink."""
     nofollow = getattr(os, "O_NOFOLLOW", 0)
+    binary = getattr(os, "O_BINARY", 0)
     source_fd: int | None = None
     backup_fd: int | None = None
     try:
         try:
-            source_fd = os.open(source, os.O_RDONLY | nofollow)
+            source_fd = os.open(source, os.O_RDONLY | nofollow | binary)
             source_stat = os.fstat(source_fd)
         except OSError as exc:
             raise InstallAbort(f"rollback source changed: {source}") from exc
@@ -1397,7 +1398,7 @@ def _copy_backup_no_follow(
         payload = b"".join(chunks)
         if payload != expected_original:
             raise InstallAbort(f"rollback source changed while copying: {source}")
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow | binary
         try:
             backup_fd = os.open(backup, flags, 0o600)
         except FileExistsError as exc:
