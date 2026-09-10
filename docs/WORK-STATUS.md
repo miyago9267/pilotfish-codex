@@ -36,6 +36,12 @@ native runtime、policy ownership、transaction、migration 與 fresh-session pr
 - [x] GitHub pre-release 已建立：
   <https://github.com/miyago9267/pilotfish-codex/releases/tag/v1.8.0-rc.2>。
 
+## Current follow-up — Astra main-session budget
+
+- [ ] Draft spec `docs/specs/astra-main-session-budget/SPEC.md` 建立；等待
+  確認 opt-in scope、`high` effort 與 `12 calls / 300 seconds` advisory
+  budget，確認前不修改 production routing 或 active global config。
+
 ## Completed
 
 - [x] blocker 跨 turn 去重：同一 blocker 只警告一次，避免 Stop loop。
@@ -151,8 +157,8 @@ native runtime、policy ownership、transaction、migration 與 fresh-session pr
 
 ## Next smallest action
 
-等待 `v1.8.0-rc.2` pre-release 使用回饋；既有 `v1.8.0-rc.1` tag
-保持 immutable。付費 Astra cohort、正式
+先審閱 Astra main-session budget draft；確認前保持 `v1.8.0-rc.2` routing
+與 global config 不變。既有 `v1.8.0-rc.1` tag 保持 immutable。付費 Astra cohort、正式
 promotion 與 stable release 不在此步驟內。
 
 ## Historical release record
