@@ -152,6 +152,7 @@ class AstraMainSessionContractTests(unittest.TestCase):
             ("-c", 'model_reasoning_effort="max"'),
             ("--profile", "luna-default"),
             ("--config=model=gpt-5.6-luna",),
+            ("--oss=true",),
         ):
             with self.subTest(extra_args=extra_args):
                 with self.assertRaisesRegex(AstraActivationError, "reserved"):

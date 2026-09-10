@@ -34,6 +34,7 @@ _RESERVED_OVERRIDE_PREFIXES = (
     "--model=",
     "--config=",
     "--profile=",
+    "--oss=",
     "--local-provider=",
     "-m=",
     "-c=",
