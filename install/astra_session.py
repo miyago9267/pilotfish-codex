@@ -27,6 +27,18 @@ _DEFAULT_OVERRIDES = {
     "plan_mode_reasoning_effort": ASTRA_PLAN_EFFORT,
     "max_concurrent_threads_per_session": ASTRA_CHILD_CONCURRENCY,
 }
+_RESERVED_OVERRIDE_FLAGS = frozenset(
+    {"--model", "--config", "--profile", "-m", "-c", "-p", "--oss", "--local-provider"}
+)
+_RESERVED_OVERRIDE_PREFIXES = (
+    "--model=",
+    "--config=",
+    "--profile=",
+    "--local-provider=",
+    "-m=",
+    "-c=",
+    "-p=",
+)
 
 
 class AstraActivationError(ValueError):
@@ -102,5 +114,12 @@ def build_codex_command(
     extras = tuple(extra_args)
     if not all(isinstance(arg, str) for arg in extras):
         raise AstraActivationError("extra arguments must be strings")
+    if any(
+        arg in _RESERVED_OVERRIDE_FLAGS
+        or arg.startswith(_RESERVED_OVERRIDE_PREFIXES)
+        or (arg.startswith(("-m", "-c", "-p")) and not arg.startswith("--"))
+        for arg in extras
+    ):
+        raise AstraActivationError("reserved Astra session override flag")
     activation = validate_activation(_DEFAULT_OVERRIDES)
     return (codex_bin, *activation.command_tokens, *extras)

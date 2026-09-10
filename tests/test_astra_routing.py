@@ -146,6 +146,17 @@ class AstraMainSessionContractTests(unittest.TestCase):
             ),
         )
 
+    def test_native_activation_rejects_reserved_override_extra_args(self) -> None:
+        for extra_args in (
+            ("--model", "gpt-5.6-luna"),
+            ("-c", 'model_reasoning_effort="max"'),
+            ("--profile", "luna-default"),
+            ("--config=model=gpt-5.6-luna",),
+        ):
+            with self.subTest(extra_args=extra_args):
+                with self.assertRaisesRegex(AstraActivationError, "reserved"):
+                    build_codex_command(extra_args=extra_args)
+
     def test_invalid_override_fails_closed_before_dispatch(self) -> None:
         with self.assertRaisesRegex(AstraActivationError, "invalid"):
             validate_activation(
