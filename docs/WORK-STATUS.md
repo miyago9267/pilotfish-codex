@@ -15,7 +15,22 @@ owner: Miyago
 完成已核准的 Astra main-session budget slice：zero-write session activation、
 usage-aware prompt、Luna delegation 與 fail-closed offline validation。
 
-## Current release candidate — v1.8.0-rc.2
+## Current release candidate — v1.8.0-rc.3
+
+- [x] Repo `VERSION`, Plugin manifest, installer constant, and policy markers
+  are synchronized to `1.8.0-rc.3`; the existing `v1.8.0-rc.2` tag remains
+  immutable.
+- [x] Draft `docs/specs/operating-presets/SPEC.md` records the economy, fast,
+  precise, and quality policy layer while preserving the default Luna/Sol
+  routing and all mandatory gates.
+- [x] Install the unique `1.8.0-rc.3` Plugin into the local global Codex home
+  after the contained symlink and reconciliation dry-runs passed; the active
+  policy symlink remains rooted at `/Users/miyago/dotfile/config/ai`.
+- [x] Verify the active Plugin cache hash matches the checkout, state-v4 is
+  committed with timestamped rollback backups, no pending sidecar exists, and
+  native role validation plus hook self-test pass.
+
+## Previous release candidate — v1.8.0-rc.2
 
 - [x] 以 capability-first policy 將 Astra 限定在 tool-heavy、MCP、computer-use
   與跨系統 execution／verification candidate path；`plan-verifier`、四個 Luna
@@ -52,6 +67,15 @@ usage-aware prompt、Luna delegation 與 fail-closed offline validation。
   `git diff --check` 通過；fresh verifier 回傳 `CONFIRMED`。
 - [x] Changelog 已加入 Unreleased entry；版本與全域安裝維持獨立決策，未
   自動升版或改寫 `/Users/miyago/.codex`。
+
+## Current follow-up — Operating presets
+
+- [x] 收斂四種 operating preset：`economy`、`fast`、`precise`、`quality`。
+- [x] 確認 preset 與 model preference 分層，保留 `review_intent` 的
+  turn-scoped contract、`plan-verifier` Sol/high、Luna mechanical roles
+  與所有 mandatory gates。
+- [ ] 實作離線 projection、precedence 與 fail-closed 測試；完成前不啟用
+  preset runtime routing，也不增加付費 Astra 測試。
 
 ## Completed
 

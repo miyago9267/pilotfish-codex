@@ -14,6 +14,15 @@ are noted only as source references.
   work, and fail-closed activation validation; keep the default Luna/Sol roles
   and `plan-verifier` binding unchanged.
 
+## v1.8.0-rc.3
+
+- Record the four-way `operating_preset` contract for economy, fast, precise,
+  and quality routing without changing the default Luna/Sol policy or role
+  bindings.
+- Refresh the local Plugin version so Codex materializes the current packaged
+  policy instead of reusing a stale same-version cache; this candidate is local
+  only and has no remote release.
+
 ## v1.8.0-rc.2
 
 - Preserve exact rollback bytes on Windows by opening rollback sources and
