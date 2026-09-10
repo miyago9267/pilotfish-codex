@@ -89,6 +89,29 @@ This is a routing decision, not a general intelligence ranking. The complete
 benchmark and bar charts are in the
 [usage-routing benchmark](./docs/benchmarks/usage-routing-v1/README.md).
 
+## Opt-in Astra main-session mode
+
+Users who deliberately choose Astra for the root session can keep the
+expensive model focused on synthesis, planning, and difficult judgment while
+Pilotfish sends mechanical work to the existing Luna roles. Start a separate
+session with launch-time overrides:
+
+```bash
+codex --model gpt-6-astra \
+  -c model_reasoning_effort="high" \
+  -c plan_mode_reasoning_effort="high" \
+  -c max_concurrent_threads_per_session=1
+```
+
+The overrides are zero-write and session-only; the installed Luna/Sol config,
+roles, hooks, and approval boundaries remain unchanged. The prompt recommends
+named inputs, one sufficient pass, and stopping at acceptance evidence. Its
+`max_tool_calls=12` and `max_wall_seconds=300` limits are advisory, not a
+provider-enforced quota. `mech-executor` and `scout` stay on Luna, and
+`plan-verifier` stays on Sol/high. If Astra is unavailable or an override is
+invalid, activation fails closed before task work; start a new session without
+the flags to return to the normal policy.
+
 ## Evidence
 
 The registered live cohort used 60 cases from the three representative

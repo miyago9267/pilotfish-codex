@@ -12,8 +12,18 @@ sys.path.insert(0, str(ROOT / "install"))
 
 import benchmark_routing as benchmark  # noqa: E402
 import benchmark_role_fitness as fitness  # noqa: E402
+from astra_session import (  # noqa: E402
+    ASTRA_CHILD_CONCURRENCY,
+    ASTRA_MAIN_EFFORT,
+    ASTRA_MAIN_MODEL,
+    ASTRA_PLAN_EFFORT,
+    AstraActivationError,
+    build_codex_command,
+    validate_activation,
+)
 import verify_dispatch  # noqa: E402
 from routing_contract import (  # noqa: E402
+    EVIDENCE_BUDGET_KEYS,
     build_routing_context,
     validate_routing_context,
 )
@@ -92,6 +102,114 @@ class AstraPricingTests(unittest.TestCase):
             workload="reasoning",
         )
         self.assertAlmostEqual(astra / sol, 1.75)
+
+
+class AstraMainSessionContractTests(unittest.TestCase):
+    def _text(self, relative: str) -> str:
+        return (ROOT / relative).read_text(encoding="utf-8")
+
+    def test_opt_in_command_is_zero_write_and_keeps_default_config_luna(self) -> None:
+        config = self._text("templates/config.snippet.toml")
+        command_sources = " ".join(
+            self._text(path)
+            for path in (
+                "templates/config.snippet.toml",
+                "README.md",
+                "INSTALL.md",
+            )
+        )
+        for token in (
+            "codex --model gpt-6-astra",
+            '-c model_reasoning_effort="high"',
+            '-c plan_mode_reasoning_effort="high"',
+            "-c max_concurrent_threads_per_session=1",
+        ):
+            self.assertIn(token, command_sources)
+        self.assertIn("session-only", command_sources)
+        self.assertIn("zero-write", command_sources)
+        self.assertIn('model = "gpt-5.6-luna"', config)
+        self.assertNotIn('model = "gpt-6-astra"', config)
+
+    def test_native_activation_command_is_explicit_and_bounded(self) -> None:
+        self.assertEqual(
+            build_codex_command(),
+            (
+                "codex",
+                "--model",
+                ASTRA_MAIN_MODEL,
+                "-c",
+                f'model_reasoning_effort="{ASTRA_MAIN_EFFORT}"',
+                "-c",
+                f'plan_mode_reasoning_effort="{ASTRA_PLAN_EFFORT}"',
+                "-c",
+                f"max_concurrent_threads_per_session={ASTRA_CHILD_CONCURRENCY}",
+            ),
+        )
+
+    def test_invalid_override_fails_closed_before_dispatch(self) -> None:
+        with self.assertRaisesRegex(AstraActivationError, "invalid"):
+            validate_activation(
+                {
+                    "model": ASTRA_MAIN_MODEL,
+                    "model_reasoning_effort": "max",
+                    "plan_mode_reasoning_effort": ASTRA_PLAN_EFFORT,
+                    "max_concurrent_threads_per_session": ASTRA_CHILD_CONCURRENCY,
+                },
+                available_models={ASTRA_MAIN_MODEL},
+            )
+
+    def test_unavailable_model_fails_closed_before_dispatch(self) -> None:
+        with self.assertRaisesRegex(AstraActivationError, "unavailable"):
+            validate_activation(
+                {
+                    "model": ASTRA_MAIN_MODEL,
+                    "model_reasoning_effort": ASTRA_MAIN_EFFORT,
+                    "plan_mode_reasoning_effort": ASTRA_PLAN_EFFORT,
+                    "max_concurrent_threads_per_session": ASTRA_CHILD_CONCURRENCY,
+                },
+                available_models={"gpt-5.6-luna"},
+            )
+
+    def test_astra_main_prompt_contract_routes_cheap_work_and_stops(self) -> None:
+        bootstrap = self._text("templates/agents-md.bootstrap.md")
+        policy = self._text("templates/agents-md.orchestration.md")
+        packaged = self._text(
+            "plugin/plugins/pilotfish-codex/skills/pilotfish-orchestration/references/"
+            "orchestration-policy.md"
+        )
+        prompt = self._text(
+            "plugin/plugins/pilotfish-codex/skills/pilotfish-orchestration/agents/openai.yaml"
+        )
+        for source in (bootstrap, policy, packaged, prompt):
+            normalized = " ".join(source.split())
+            for phrase in (
+                "astra-thinking",
+                "named inputs",
+                "one sufficient pass",
+                "max_tool_calls=12",
+                "max_wall_seconds=300",
+                "advisory",
+                "mechanical",
+                "Luna",
+                "plan-verifier",
+                "Sol",
+            ):
+                self.assertIn(phrase, normalized)
+        self.assertIn("fail-closed", bootstrap)
+        self.assertIn("no-flags", policy)
+
+    def test_packaged_policy_is_kept_in_sync_and_receipt_schema_is_unchanged(self) -> None:
+        template = self._text("templates/agents-md.orchestration.md")
+        packaged = self._text(
+            "plugin/plugins/pilotfish-codex/skills/pilotfish-orchestration/references/"
+            "orchestration-policy.md"
+        )
+        self.assertEqual(packaged, template)
+        self.assertEqual(
+            set(EVIDENCE_BUDGET_KEYS),
+            {"max_tool_calls", "max_wall_seconds", "context_scope"},
+        )
+        self.assertNotIn("advisory", EVIDENCE_BUDGET_KEYS)
 
 
 class AstraRoleRoutingTests(unittest.TestCase):

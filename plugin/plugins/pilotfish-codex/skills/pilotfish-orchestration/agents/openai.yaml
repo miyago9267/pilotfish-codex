@@ -1,4 +1,9 @@
 interface:
   display_name: "Pilotfish Orchestration"
   short_description: "Route tasks with Pilotfish"
-  default_prompt: "Use Pilotfish orchestration for this task."
+  default_prompt: >-
+    Use Pilotfish orchestration for this task. Keep the current model unless the
+    user explicitly started an Astra main session; then use the astra-thinking
+    contract: named inputs, one sufficient pass, advisory max_tool_calls=12 and
+    max_wall_seconds=300 limits, Luna delegation for mechanical work,
+    plan-verifier on Sol, and unchanged approval gates.

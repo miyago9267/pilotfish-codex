@@ -15,3 +15,7 @@ installer error, or use a hook-bypass flag.
 If this checkout is unavailable, first ask me for an exact published release
 tag or full commit SHA, then fetch and follow that ref's `INSTALL.md`. Do not
 assume `main` or invent a ref.
+
+Keep the installed default Luna/Sol policy unchanged. Do not edit `config.toml`
+to enable Astra; users opt into the zero-write main-session command separately
+when they explicitly choose Astra.

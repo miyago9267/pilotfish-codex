@@ -9,6 +9,10 @@ are noted only as source references.
 
 - Add the `pilotfish-decision-checkpoint-v1` contract with bounded options,
   conservative confirmation/rejection handling, and an explicit resume record.
+- Add an opt-in, zero-write Astra main-session mode with high-effort synthesis,
+  advisory 12-call/300-second usage guidance, Luna delegation for mechanical
+  work, and fail-closed activation validation; keep the default Luna/Sol roles
+  and `plan-verifier` binding unchanged.
 
 ## v1.8.0-rc.2
 

@@ -14,6 +14,18 @@ Pilotfish supplements them and does not replace their precedence boundary.
 - `mech-executor` and `scout` are baseline-only: keep their installed Luna
   bindings, never request Astra, and route to `executor` or `verifier` when
   work exceeds their boundary instead of upgrading the child in place.
+- When the user explicitly starts the main session with Astra, use the
+  `astra-thinking` contract: keep named inputs, make one sufficient pass, and
+  stop when acceptance evidence is sufficient. Delegate mechanical or
+  repetitive work to the existing Luna roles.
+- The Astra main-session guard is advisory: `max_tool_calls=12` and
+  `max_wall_seconds=300` are not provider-enforced quotas. Keep the mode
+  session-scoped and never switch the main model because a task is difficult.
+- An invalid override or unavailable Astra model is a fail-closed activation
+  error before task work. Start a new no-flags session to use the normal
+  Luna/Sol policy.
+- Keep `plan-verifier` on `gpt-5.6-sol@high`; approval, security, release, and
+  fresh-verifier gates remain unchanged.
 - Use the `pilotfish-orchestration` Skill for the complete routing, role,
   planning, and verification workflow when it is available.
 - If the Skill or Plugin is unavailable, keep these core invariants active and

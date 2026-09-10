@@ -2,7 +2,7 @@
 id: pilotfish-work-status
 title: Pilotfish Codex work status
 status: active
-updated: 2026-09-09
+updated: 2026-09-10
 owner: Miyago
 ---
 
@@ -12,8 +12,8 @@ owner: Miyago
 
 ## Current objective
 
-完成 Hybrid Pilotfish runtime spec：root always-on bootstrap、Codex Plugin／Skill、
-native runtime、policy ownership、transaction、migration 與 fresh-session probe。
+完成已核准的 Astra main-session budget slice：zero-write session activation、
+usage-aware prompt、Luna delegation 與 fail-closed offline validation。
 
 ## Current release candidate — v1.8.0-rc.2
 
@@ -38,9 +38,16 @@ native runtime、policy ownership、transaction、migration 與 fresh-session pr
 
 ## Current follow-up — Astra main-session budget
 
-- [ ] Draft spec `docs/specs/astra-main-session-budget/SPEC.md` 建立；等待
-  確認 opt-in scope、`high` effort 與 `12 calls / 300 seconds` advisory
-  budget，確認前不修改 production routing 或 active global config。
+- [x] Draft spec `docs/specs/astra-main-session-budget/SPEC.md` 通過獨立
+  Plan review，並確認 opt-in scope、`high` effort 與 `12 calls / 300 seconds`
+  advisory budget。
+- [x] 以 zero-write native flags 實作 Astra main-session activation；預設
+  config、production role binding 與 active global config 維持不變。
+- [x] 更新 bootstrap、orchestration policy、Plugin default prompt 與安裝文件：
+  Astra 做 synthesis／planning，機械工作走 Luna，Sol gates 不變。
+- [x] 新增 offline activation validator 與 prompt／routing regression tests；
+  invalid override／unavailable model 在 task dispatch 前 fail-closed。
+- [ ] 完成 full validators、fresh verifier 與 changelog/版本發布決策。
 
 ## Completed
 

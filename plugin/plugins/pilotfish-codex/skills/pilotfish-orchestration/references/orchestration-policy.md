@@ -38,6 +38,37 @@ projection never bypasses typed dispatch or host approval.
 | Verification or execution spanning systems, browser, MCP, terminal, deployment evidence, or a long acceptance flow | Current role binding | `verifier` or `executor` at Astra `high` when the trigger is explicit |
 | Fingerprinted disagreement between two verdicts | Existing adjudication path | One Astra `high` adjudication, then stop |
 
+#### Explicit Astra main-session mode
+
+When the user deliberately starts the root session with `gpt-6-astra`, keep
+that choice session-scoped and apply the `astra-thinking` operating contract.
+The documented zero-write activation is:
+
+```bash
+codex --model gpt-6-astra \
+  -c model_reasoning_effort="high" \
+  -c plan_mode_reasoning_effort="high" \
+  -c max_concurrent_threads_per_session=1
+```
+
+These are launch-time overrides; the base config, policy, role files, hooks,
+and installer state remain untouched. The prompt recommends named inputs, one
+sufficient pass, minimal research, and a stop at acceptance evidence. Treat
+`max_tool_calls=12` and `max_wall_seconds=300` as advisory limits, not a
+provider-enforced quota. The one-child cap is the only native concurrency
+guard in this mode.
+
+Use Astra for synthesis, planning, and difficult judgment. Delegate routine,
+mechanical, repetitive, and bounded execution to the existing Luna roles.
+`mech-executor` and `scout` remain baseline-only, and `plan-verifier` remains
+`gpt-5.6-sol@high`; required approval, security, release, and fresh-verifier
+gates remain unchanged. Do not create an Astra child or switch the main model
+automatically because a task is difficult.
+
+If Astra is unavailable or an override is invalid, fail closed before task
+work or an Astra dispatch receipt. Recovery requires a separately started
+no-flags session, which returns to the normal Luna/Sol policy.
+
 `mech-executor` and `scout` are baseline-only roles. Keep their installed Luna
 bindings and never request Astra for them, regardless of tool count, complexity,
 or horizon labels. If the work exceeds a mechanical or reconnaissance boundary,

@@ -35,6 +35,27 @@ Before any run, confirm all of the following:
 Do not print or copy `auth.json`, tokens, API keys, or other credentials while
 inspecting the home.
 
+## Optional Astra main-session mode
+
+The installer keeps the default Luna/Sol policy. To opt into Astra for one
+root session, start Codex with launch-time overrides instead of editing
+`config.toml`:
+
+```bash
+codex --model gpt-6-astra \
+  -c model_reasoning_effort="high" \
+  -c plan_mode_reasoning_effort="high" \
+  -c max_concurrent_threads_per_session=1
+```
+
+This activation is zero-write and session-only. The prompt keeps Astra on
+synthesis, planning, and difficult judgment; delegates mechanical work to
+Luna; and preserves `plan-verifier` on Sol/high plus all approval and security
+gates. `max_tool_calls=12` and `max_wall_seconds=300` are advisory limits, not
+a provider-enforced quota. An invalid override or unavailable Astra model must
+fail closed before task work; start a new session without the flags to return
+to the normal policy. No installer option enables this mode by default.
+
 ## Confirmation boundary
 
 The agent may fetch this playbook, inspect source, check versions, read the

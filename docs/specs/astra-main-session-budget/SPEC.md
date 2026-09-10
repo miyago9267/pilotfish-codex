@@ -139,6 +139,8 @@ contract before shipping.
 ## Files
 
 - `docs/specs/astra-main-session-budget/SPEC.md` - this contract.
+- `install/astra_session.py` - offline validation and command construction for
+  the zero-write session overrides.
 - `templates/config.snippet.toml` - native configuration reference.
 - `templates/agents-md.bootstrap.md` - short always-on routing guard.
 - `templates/agents-md.orchestration.md` - detailed routing and prompt policy.

@@ -71,6 +71,24 @@ artifact task 作为 native-rollout proxy：
 intelligence ranking。完整 benchmark 与 bar charts 请查看
 [usage-routing benchmark](./benchmarks/usage-routing-v1/README.md)。
 
+## Opt-in Astra 主工作阶段
+
+如果用户明确选择 Astra 作为 root session，可以用 launch-time override 启动
+一个 zero-write、只限该 session 的模式：
+
+```bash
+codex --model gpt-6-astra \
+  -c model_reasoning_effort="high" \
+  -c plan_mode_reasoning_effort="high" \
+  -c max_concurrent_threads_per_session=1
+```
+
+`astra-thinking` 让 Astra 负责 synthesis、planning 与难判断；mechanical 和
+重复工作交给 Luna。`max_tool_calls=12` 与 `max_wall_seconds=300` 是 advisory
+限制，不是 provider quota；`plan-verifier` 维持 Sol/high，既有 approval 与
+security gates 不变。Astra 不可用或 override 无效时会在 task work 前
+fail-closed；移除 flags 后另开新 session 即回到正常 Luna/Sol policy。
+
 ## 实验效果
 
 正式 live cohort 使用三个代表性场景，共 60 组案例；每组各执行一次 route
