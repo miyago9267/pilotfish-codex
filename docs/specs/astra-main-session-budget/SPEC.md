@@ -1,11 +1,11 @@
 ---
 id: spec-astra-main-session-budget
 title: Astra main-session budget mode
-status: draft
+status: completed
 created: 2026-09-10
 updated: 2026-09-10
 author: Miyago
-approved_by:
+approved_by: Miyago (S0 approval, 2026-09-10)
 tags: [astra, routing, usage, prompt]
 priority: high
 ---
@@ -124,16 +124,16 @@ contract before shipping.
 
 ## Tasks
 
-- [ ] S0: Review this contract and confirm the opt-in scope and budget values.
-- [ ] S1: Document and test the zero-write native session command without
+- [x] S0: Review this contract and confirm the opt-in scope and budget values.
+- [x] S1: Document and test the zero-write native session command without
   changing the active user's model by default.
-- [ ] S2: Update the default bootstrap/orchestration prompt and packaged policy
+- [x] S2: Update the default bootstrap/orchestration prompt and packaged policy
   with the Astra main-session contract and minimality rules.
-- [ ] S3: Add offline routing/prompt tests for Astra main mode, Luna delegation,
+- [x] S3: Add offline routing/prompt tests for Astra main mode, Luna delegation,
   Sol plan-verifier preservation, and fail-closed unavailable-model behavior.
   Invalid overrides must stop before task work or an Astra dispatch receipt;
   recovery requires a separately started no-flags session.
-- [ ] S4: Run validators, targeted tests, and a fresh read-only verifier; update
+- [x] S4: Run validators, targeted tests, and a fresh read-only verifier; update
   the changelog only after the contract is accepted.
 
 ## Files

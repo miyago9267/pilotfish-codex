@@ -47,7 +47,11 @@ usage-aware prompt、Luna delegation 與 fail-closed offline validation。
   Astra 做 synthesis／planning，機械工作走 Luna，Sol gates 不變。
 - [x] 新增 offline activation validator 與 prompt／routing regression tests；
   invalid override／unavailable model 在 task dispatch 前 fail-closed。
-- [ ] 完成 full validators、fresh verifier 與 changelog/版本發布決策。
+- [x] Full offline suite `405 passed, 1 skipped`、`py_compile`、strict
+  config/role validation、Markdown lint `68 files / 0 errors` 與
+  `git diff --check` 通過；fresh verifier 回傳 `CONFIRMED`。
+- [x] Changelog 已加入 Unreleased entry；版本與全域安裝維持獨立決策，未
+  自動升版或改寫 `/Users/miyago/.codex`。
 
 ## Completed
 
