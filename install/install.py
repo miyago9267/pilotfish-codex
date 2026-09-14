@@ -39,7 +39,7 @@ from hook_registration import (
     validate_source_registration,
     windows_compatibility_warnings,
 )
-from validate_agents import ROLES, validate_agent, validate_agents_config
+from validate_agents import AGENTS_CONCURRENCY_KEY, ROLES, validate_agent, validate_agents_config
 
 IS_WINDOWS = sys.platform == "win32"
 MARKER_BEGIN = "<!-- pilotfish-codex:begin -->"
@@ -98,7 +98,7 @@ class PolicyTargetIdentity:
 
 MIN_COMPATIBLE_CODEX_VERSION = (0, 147, 0)
 PILOTFISH_PLUGIN_NAME = "pilotfish-codex"
-PILOTFISH_PLUGIN_VERSION = "1.8.0-rc.3"
+PILOTFISH_PLUGIN_VERSION = "1.8.0-rc.4"
 RUNTIME_STATUSES = frozenset({"integrated", "integrated-plugin-unavailable"})
 RECONCILIATION_STATE_VERSION = 4
 
@@ -312,25 +312,14 @@ def _set_table_key(lines: list[str], table: str, key: str, value: str, nl: str) 
     return result[: start + 1] + [f"{key} = {value}{nl}"] + result[start + 1 :]
 
 
-def _set_root_key(lines: list[str], key: str, value: str, nl: str) -> list[str]:
-    """Set a TOML root key without placing it inside the next table."""
+def _remove_root_key(lines: list[str], key: str) -> list[str]:
+    """Remove one TOML root key without touching the next table."""
     pattern = re.compile(rf"^\s*{re.escape(key)}\s*=")
     table_start = next(
         (index for index, line in enumerate(lines) if line.split("#", 1)[0].strip().startswith("[")),
         len(lines),
     )
-    result = list(lines)
-    for index in range(table_start):
-        if pattern.match(result[index]):
-            ending = "\r\n" if result[index].endswith("\r\n") else "\n"
-            result[index] = f"{key} = {value}{ending}"
-            return result
-    insertion = table_start
-    if insertion > 0 and result[insertion - 1].strip():
-        result.insert(insertion, nl)
-        insertion += 1
-    result.insert(insertion, f"{key} = {value}{nl}")
-    return result
+    return [line for index, line in enumerate(lines) if not (index < table_start and pattern.match(line))]
 
 
 def _remove_table_key(lines: list[str], table: str, key: str) -> list[str]:
@@ -365,7 +354,7 @@ def merge_config_text(
     owned_legacy: frozenset[str] = frozenset(),
     migration_proven: bool = False,
 ) -> tuple[str, list[str]]:
-    """Render Codex 0.147's native routing and decision-card settings."""
+    """Render Codex's native routing and decision-card settings."""
     try:
         config = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
@@ -376,7 +365,7 @@ def merge_config_text(
     agents = config.get("agents", {})
     if not isinstance(agents, dict):
         raise InstallAbort("agents must be a TOML table")
-    if agents and set(agents) != OLD_V2_KEYS:
+    if agents and set(agents) not in (OLD_V2_KEYS, {AGENTS_CONCURRENCY_KEY}):
         raise InstallAbort("agents table has unsupported or unowned keys")
     v2 = features.get("multi_agent_v2")
     if v2 is not None and not isinstance(v2, dict):
@@ -393,14 +382,25 @@ def merge_config_text(
             raise InstallAbort("legacy V2 concurrency must be exactly 4")
         if not migration_proven:
             raise InstallAbort("legacy V2 migration requires committed installer provenance")
-    if set(agents) == OLD_V2_KEYS:
+    canonical_agents = set(agents) == {AGENTS_CONCURRENCY_KEY}
+    legacy_agents = set(agents) == OLD_V2_KEYS
+    if canonical_agents and (
+        type(agents.get(AGENTS_CONCURRENCY_KEY)) is not int
+        or agents[AGENTS_CONCURRENCY_KEY] != 3
+    ):
+        raise InstallAbort(
+            "agents.max_concurrent_threads_per_session conflicts with native child concurrency 3"
+        )
+    if legacy_agents:
         if agents.get("enabled") is not True:
             raise InstallAbort("agents.enabled conflicts with native migration")
         if agents.get("max_concurrent_threads_per_session") != 3:
             raise InstallAbort("agents.max_concurrent_threads_per_session conflicts with native child concurrency 3")
-    root_concurrency = config.get("max_concurrent_threads_per_session")
+    root_concurrency = config.get(AGENTS_CONCURRENCY_KEY)
     if root_concurrency is not None and (type(root_concurrency) is not int or root_concurrency != 3):
-        raise InstallAbort("root max_concurrent_threads_per_session conflicts with native child concurrency 3")
+        raise InstallAbort(
+            "legacy root max_concurrent_threads_per_session conflicts with native child concurrency 3"
+        )
     if features.get("multi_agent") is True and "features.multi_agent" not in owned_legacy:
         raise InstallAbort("legacy_key_unowned: features.multi_agent")
 
@@ -420,17 +420,20 @@ def merge_config_text(
         notes.extend(note for _, note in missing_root_defaults)
     if migrating_v2:
         lines = _remove_table(lines, "features.multi_agent_v2")
-        notes.append("migrated exact legacy V2 table to root child concurrency")
-    if set(agents) == OLD_V2_KEYS:
+        notes.append("migrated exact legacy V2 table to canonical agents child concurrency")
+    if legacy_agents:
         lines = _remove_table(lines, "agents")
-        notes.append("migrated legacy agents concurrency table to root child concurrency")
+        notes.append("migrated legacy agents concurrency table to canonical child concurrency")
     if "features.multi_agent" in owned_legacy:
         lines = _remove_table_key(lines, "features", "multi_agent")
         notes.append("removed owned legacy key features.multi_agent")
     lines = _set_table_key(lines, "features", "default_mode_request_user_input", "true", nl)
     notes.append("enabled native default-mode decision cards")
-    lines = _set_root_key(lines, "max_concurrent_threads_per_session", "3", nl)
-    notes.append("normalized root child concurrency to 3")
+    if AGENTS_CONCURRENCY_KEY in config:
+        lines = _remove_root_key(lines, AGENTS_CONCURRENCY_KEY)
+        notes.append("migrated root child concurrency to the agents table")
+    lines = _set_table_key(lines, "agents", AGENTS_CONCURRENCY_KEY, "3", nl)
+    notes.append("normalized agents child concurrency to 3")
     result = "".join(lines)
     try:
         tomllib.loads(result)

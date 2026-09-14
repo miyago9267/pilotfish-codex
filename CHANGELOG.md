@@ -7,12 +7,26 @@ are noted only as source references.
 
 ## Unreleased
 
+## v1.8.0-rc.4
+
 - Add the `pilotfish-decision-checkpoint-v1` contract with bounded options,
   conservative confirmation/rejection handling, and an explicit resume record.
 - Add an opt-in, zero-write Astra main-session mode with high-effort synthesis,
   advisory 12-call/300-second usage guidance, Luna delegation for mechanical
   work, and fail-closed activation validation; keep the default Luna/Sol roles
   and `plan-verifier` binding unchanged.
+- Define outcome-level continuation so clear attended work runs through the
+  necessary phases and verification, while explicit step/slice boundaries and
+  material approval gates still stop execution; update the internal route
+  contract and offline corpus accordingly.
+- Add a prompt/document lock covering 15 agent behavior surfaces with required
+  semantic anchors, bounded Git diff budgets, immutable lock metadata, and CI
+  enforcement.
+- Align native child-concurrency config with Codex's `[agents]` schema so
+  `--strict-config` accepts the installed `0.154.0` runtime; migrate the old
+  root key and update the Astra session override.
+- Refresh the Plugin version so Codex materializes the outcome-level
+  continuation policy instead of reusing a stale same-version cache.
 
 ## v1.8.0-rc.3
 

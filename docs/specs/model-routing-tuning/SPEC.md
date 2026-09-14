@@ -52,7 +52,7 @@ exact-version pin.
   later release merely because it is newer. Native contract evidence remains
   authoritative for behavior compatibility.
 - Replace the old `[features.multi_agent_v2]` total of four slots with the
-  documented root setting `max_concurrent_threads_per_session = 3`.
+  documented `[agents]` setting `max_concurrent_threads_per_session = 3`.
   This preserves one root plus up to three children.
 - Atomically migrate only the prior, installer-owned V2 config. A false,
   malformed, or unowned legacy value remains fail-closed; unrelated config and

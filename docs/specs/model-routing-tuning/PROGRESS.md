@@ -21,12 +21,12 @@
       existing Nanako risk-triggered Plan review to Sol/high without changing
       its invocation timing.
 - [x] P6. Migrate the native routing contract to a `>=0.147.0`
-      compatibility floor: use the documented root child concurrency
+      compatibility floor: use the documented `[agents]` child concurrency
       contract, preserve the Nanako risk trigger, migrate only an exact
       state-owned V2 table, and emit an
       auditable per-path dry-run manifest including transaction artifacts.
 - [x] P7. With explicit operator authorization, back up and reconcile the
       stale active install state, then migrate the active Codex home. The
-      installer now uses native root concurrency, upgrades the canonical security
+      installer now uses native `[agents]` concurrency, upgrades the canonical security
       reviewer, applies the approved Luna/medium root override, and is
       idempotent on dry-run.

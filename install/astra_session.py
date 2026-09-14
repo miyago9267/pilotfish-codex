@@ -10,6 +10,7 @@ ASTRA_MAIN_MODEL = "gpt-6-astra"
 ASTRA_MAIN_EFFORT = "high"
 ASTRA_PLAN_EFFORT = "high"
 ASTRA_CHILD_CONCURRENCY = 1
+ASTRA_CONCURRENCY_CONFIG_KEY = "agents.max_concurrent_threads_per_session"
 ASTRA_ADVISORY_MAX_TOOL_CALLS = 12
 ASTRA_ADVISORY_MAX_WALL_SECONDS = 300
 
@@ -69,7 +70,7 @@ class AstraActivation:
             "-c",
             f'plan_mode_reasoning_effort="{self.plan_mode_reasoning_effort}"',
             "-c",
-            f"max_concurrent_threads_per_session={self.max_concurrent_threads_per_session}",
+            f"{ASTRA_CONCURRENCY_CONFIG_KEY}={self.max_concurrent_threads_per_session}",
         )
 
 

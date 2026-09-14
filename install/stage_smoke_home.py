@@ -30,7 +30,12 @@ from hook_registration import (
     validate_projection_state,
     validate_source_registration,
 )
-from validate_agents import ROLES, validate_dir
+from validate_agents import (
+    AGENTS_CONCURRENCY_KEY,
+    AGENTS_CONCURRENCY_RECOMMENDED,
+    ROLES,
+    validate_dir,
+)
 
 HASHED_TOP_LEVEL = frozenset({
     "config.toml",
@@ -50,6 +55,7 @@ SMOKE_CONFIG = (
     b'model = "gpt-5.6-luna"\n'
     b'model_reasoning_effort = "medium"\n'
     b'plan_mode_reasoning_effort = "xhigh"\n\n'
+    b"[agents]\n"
     b"max_concurrent_threads_per_session = 3\n\n"
     b"[features]\n"
     b"default_mode_request_user_input = true\n\n"
@@ -61,7 +67,7 @@ class StageError(RuntimeError):
 
 
 def project_config_bytes(content: bytes) -> bytes:
-    """Return the canonical Codex 0.147 config required by smoke."""
+    """Return the canonical Codex config required by smoke."""
     try:
         config = tomllib.loads(content.decode("utf-8"))
     except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
@@ -74,10 +80,12 @@ def project_config_bytes(content: bytes) -> bytes:
     agents = config.get("agents", {})
     if not isinstance(agents, dict):
         raise StageError("agents must be a role table")
-    if agents:
-        raise StageError("native agents table must be empty; role declarations are staged from agents/")
-    if config.get("max_concurrent_threads_per_session") != 3:
-        raise StageError("required root concurrency config is unavailable")
+    if set(agents) != {AGENTS_CONCURRENCY_KEY} or type(
+        agents.get(AGENTS_CONCURRENCY_KEY)
+    ) is not int or agents[AGENTS_CONCURRENCY_KEY] != AGENTS_CONCURRENCY_RECOMMENDED:
+        raise StageError("required agents child concurrency config is unavailable")
+    if AGENTS_CONCURRENCY_KEY in config:
+        raise StageError("legacy root concurrency config is unavailable")
     if (
         config.get("model") != "gpt-5.6-luna"
         or config.get("model_reasoning_effort") != "medium"

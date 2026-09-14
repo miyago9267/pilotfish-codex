@@ -74,6 +74,9 @@ class AdaptiveRoutingTests(unittest.TestCase):
                     "decision_card": self._decision_card()
                     if expected["decision_card"]
                     else None,
+                    "execution_scope": expected["execution_scope"],
+                    "continuation_mode": expected["continuation_mode"],
+                    "stop_condition": expected["stop_condition"],
                 }
             )
         return decisions
@@ -104,14 +107,30 @@ class AdaptiveRoutingTests(unittest.TestCase):
             {case["expected"]["abstain"] for case in self.route_corpus["cases"]},
             {True, False},
         )
+        self.assertEqual(
+            {case["expected"]["execution_scope"] for case in self.route_corpus["cases"]},
+            {"step", "slice", "outcome"},
+        )
+        self.assertEqual(
+            {
+                case["expected"]["continuation_mode"]
+                for case in self.route_corpus["cases"]
+            },
+            {"attended_until_acceptance", "explicit_unattended"},
+        )
+        self.assertEqual(
+            {case["expected"]["stop_condition"] for case in self.route_corpus["cases"]},
+            {"named_boundary", "acceptance", "material_gate", "decision"},
+        )
 
     def test_perfect_route_decisions_pass_all_behavioral_gates(self) -> None:
         report = evaluate_route(self.route_corpus, self._perfect_route_decisions())
 
         self.assertTrue(report["passed"])
-        self.assertEqual(report["coverage"]["expected"], 9)
+        self.assertEqual(report["coverage"]["expected"], 12)
         self.assertEqual(report["route_selection"]["accuracy"], 1.0)
         self.assertEqual(report["signal_bundle"]["accuracy"], 1.0)
+        self.assertEqual(report["execution_contract"]["accuracy"], 1.0)
         self.assertEqual(report["abstention"]["accuracy"], 1.0)
         self.assertEqual(report["decision_card"]["accuracy"], 1.0)
         self.assertEqual(report["false_direct_execution"], 0)
@@ -189,6 +208,17 @@ class AdaptiveRoutingTests(unittest.TestCase):
         self.assertFalse(report["passed"])
         self.assertEqual(report["invalid_decisions"]["overconfident"], 1)
         self.assertEqual(report["invalid_decisions"]["decision_card_missing"], 0)
+
+    def test_route_rejects_per_command_continuation_and_gate_downgrade(self) -> None:
+        decisions = self._perfect_route_decisions()
+        decisions[0]["continuation_mode"] = "per_command"
+        decisions[3]["approval_required"] = False
+
+        report = evaluate_route(self.route_corpus, decisions)
+
+        self.assertFalse(report["passed"])
+        self.assertEqual(report["invalid_decisions"]["malformed"], 1)
+        self.assertEqual(report["invalid_decisions"]["overconfident"], 1)
 
     def test_route_card_requires_ask_user_question_style_options(self) -> None:
         decisions = self._perfect_route_decisions()

@@ -85,7 +85,7 @@ intelligence ranking。完整 benchmark 與 bar charts 請看
 codex --model gpt-6-astra \
   -c model_reasoning_effort="high" \
   -c plan_mode_reasoning_effort="high" \
-  -c max_concurrent_threads_per_session=1
+  -c agents.max_concurrent_threads_per_session=1
 ```
 
 `astra-thinking` 讓 Astra 負責 synthesis、planning 與難判斷；mechanical 和
@@ -151,6 +151,7 @@ Remote installation 必須在 script URL 與 archive ref 使用同一個 release
 | 主題 | 文件 |
 | --- | --- |
 | Design 與 policy 邊界 | [docs/design.md](./design.md) |
+| Prompt／description 文件鎖 | [lock spec](./specs/prompt-document-lock/SPEC.md) |
 | Adaptive routing 設計 | [EXPERIMENT.md](./specs/adaptive-intent-routing/EXPERIMENT.md) |
 | Adaptive routing 結果 | [EXPERIMENT-RESULTS.md](./specs/adaptive-intent-routing/EXPERIMENT-RESULTS.md) |
 | Live experiment protocol | [LIVE-EXPERIMENT.md](./specs/adaptive-intent-routing/LIVE-EXPERIMENT.md) |
@@ -162,6 +163,7 @@ Remote installation 必須在 script URL 與 archive ref 使用同一個 release
 ```bash
 bun install --frozen-lockfile
 bun run lint:md
+python3 install/validate_prompt_lock.py --base-ref HEAD
 python3 -m unittest discover -s tests -v
 ```
 

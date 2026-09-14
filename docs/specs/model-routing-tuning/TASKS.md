@@ -20,7 +20,8 @@
       config; make dry-run list every target and transaction-artifact path
       before any home write.
 - [x] Update README, the install runbook, and design rationale to make the
-      native root concurrency contract and `>=0.147.0` compatibility floor explicit.
+      native `[agents]` concurrency contract and `>=0.147.0` compatibility
+      floor explicit.
 - [x] Run the protected installer against the active Codex home after its
       0.147 dry-run identifies only owned routing changes.
 - [x] Resolve the stale active install state with explicit operator approval;

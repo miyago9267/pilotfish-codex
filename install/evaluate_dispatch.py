@@ -24,6 +24,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from execution_contract import (
+    ExecutionContractError,
+    validate_execution_contract,
+)
+
 
 ALLOWED_ROLES = frozenset(
     {
@@ -66,6 +71,9 @@ ROUTE_FIELDS = frozenset(
         "evidence_sufficient",
         "rationale",
         "decision_card",
+        "execution_scope",
+        "continuation_mode",
+        "stop_condition",
     }
 )
 ROUTE_EXPECTED_FIELDS = frozenset(
@@ -82,6 +90,9 @@ ROUTE_EXPECTED_FIELDS = frozenset(
         "approval_required",
         "role",
         "decision_card",
+        "execution_scope",
+        "continuation_mode",
+        "stop_condition",
     }
 )
 ROUTE_INTENT_FIELDS = frozenset(
@@ -397,6 +408,22 @@ def _validate_route_expected(expected: Any, case_id: str) -> None:
         raise EvaluationError(f"case {case_id}: invalid expected role")
     if type(expected["decision_card"]) is not bool:
         raise EvaluationError(f"case {case_id}: expected decision_card must be boolean")
+    try:
+        validate_execution_contract(
+            {
+                "execution_scope": expected["execution_scope"],
+                "continuation_mode": expected["continuation_mode"],
+                "stop_condition": expected["stop_condition"],
+            }
+        )
+    except ExecutionContractError as exc:
+        raise EvaluationError(f"case {case_id}: {exc}") from exc
+    if expected["stop_condition"] == "material_gate" and not (
+        expected["approval_required"] and expected["next_gate"] == "approval"
+    ):
+        raise EvaluationError(
+            f"case {case_id}: material_gate must preserve the approval gate"
+        )
     if ROUTE_INTENT_FIELDS.issubset(expected):
         if expected["review_intent"] not in ALLOWED_REVIEW_INTENTS:
             raise EvaluationError(f"case {case_id}: invalid expected review_intent")
@@ -535,6 +562,20 @@ def _route_decision_error(decision: Any) -> str | None:
         return "malformed"
     if not _is_nonempty_string(decision["rationale"]):
         return "empty_rationale"
+    try:
+        validate_execution_contract(
+            {
+                "execution_scope": decision["execution_scope"],
+                "continuation_mode": decision["continuation_mode"],
+                "stop_condition": decision["stop_condition"],
+            }
+        )
+    except (ExecutionContractError, KeyError):
+        return "malformed"
+    if decision["stop_condition"] == "material_gate" and not (
+        decision["approval_required"] and decision["next_gate"] == "approval"
+    ):
+        return "overconfident"
     if decision["approval_required"] and decision["next_gate"] != "approval":
         return "malformed"
     if decision["discovery_budget"] == "none" and decision["budget_exhausted"]:
@@ -638,6 +679,9 @@ def evaluate_route(
         "next_gate",
         "budget_exhausted",
         "evidence_sufficient",
+        "execution_scope",
+        "continuation_mode",
+        "stop_condition",
     )
     has_review_intent = any(
         ROUTE_INTENT_FIELDS.issubset(expected)
@@ -667,6 +711,13 @@ def evaluate_route(
     )
     approval_correct = sum(
         accepted.get(case_id, {}).get("approval_required") == expected["approval_required"]
+        for case_id, expected in expected_by_id.items()
+    )
+    execution_contract_correct = sum(
+        all(
+            accepted.get(case_id, {}).get(field) == expected[field]
+            for field in ("execution_scope", "continuation_mode", "stop_condition")
+        )
         for case_id, expected in expected_by_id.items()
     )
     review_intent_correct = (
@@ -704,6 +755,7 @@ def evaluate_route(
         and card_accuracy >= min_card_accuracy
         and role_correct == total
         and approval_correct == total
+        and execution_contract_correct == total
     )
     return {
         "evaluator": "adaptive-route-behavioral-not-runtime-enforcement",
@@ -735,6 +787,11 @@ def evaluate_route(
         },
         "role_expectation": {"correct": role_correct, "total": total},
         "approval_expectation": {"correct": approval_correct, "total": total},
+        "execution_contract": {
+            "correct": execution_contract_correct,
+            "total": total,
+            "accuracy": execution_contract_correct / total if total else 1.0,
+        },
         "review_intent": (
             {
                 "correct": review_intent_correct,

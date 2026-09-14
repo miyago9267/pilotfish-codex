@@ -1,6 +1,6 @@
 {
-  "version": 1,
-  "description": "Adaptive route decisions; evaluates semantic policy behavior and not runtime dispatch.",
+  "version": 2,
+  "description": "Adaptive route and outcome-boundary decisions; evaluates semantic policy behavior and not runtime dispatch.",
   "cases": [
     {
       "id": "direct-context-answer",
@@ -20,7 +20,10 @@
         "role": null,
         "budget_exhausted": false,
         "evidence_sufficient": true,
-        "decision_card": false
+        "decision_card": false,
+        "execution_scope": "outcome",
+        "continuation_mode": "attended_until_acceptance",
+        "stop_condition": "acceptance"
       }
     },
     {
@@ -41,7 +44,10 @@
         "role": null,
         "budget_exhausted": false,
         "evidence_sufficient": true,
-        "decision_card": false
+        "decision_card": false,
+        "execution_scope": "outcome",
+        "continuation_mode": "attended_until_acceptance",
+        "stop_condition": "acceptance"
       }
     },
     {
@@ -63,7 +69,10 @@
         "role": "executor",
         "budget_exhausted": false,
         "evidence_sufficient": true,
-        "decision_card": false
+        "decision_card": false,
+        "execution_scope": "outcome",
+        "continuation_mode": "attended_until_acceptance",
+        "stop_condition": "acceptance"
       }
     },
     {
@@ -86,7 +95,10 @@
         "role": "scout",
         "budget_exhausted": false,
         "evidence_sufficient": true,
-        "decision_card": true
+        "decision_card": true,
+        "execution_scope": "outcome",
+        "continuation_mode": "attended_until_acceptance",
+        "stop_condition": "material_gate"
       }
     },
     {
@@ -108,7 +120,10 @@
         "role": null,
         "budget_exhausted": false,
         "evidence_sufficient": true,
-        "decision_card": true
+        "decision_card": true,
+        "execution_scope": "outcome",
+        "continuation_mode": "attended_until_acceptance",
+        "stop_condition": "material_gate"
       }
     },
     {
@@ -129,7 +144,10 @@
         "role": null,
         "budget_exhausted": false,
         "evidence_sufficient": true,
-        "decision_card": true
+        "decision_card": true,
+        "execution_scope": "slice",
+        "continuation_mode": "attended_until_acceptance",
+        "stop_condition": "decision"
       }
     },
     {
@@ -150,7 +168,10 @@
         "role": null,
         "budget_exhausted": false,
         "evidence_sufficient": true,
-        "decision_card": false
+        "decision_card": false,
+        "execution_scope": "outcome",
+        "continuation_mode": "attended_until_acceptance",
+        "stop_condition": "acceptance"
       }
     },
     {
@@ -171,7 +192,10 @@
         "role": null,
         "budget_exhausted": false,
         "evidence_sufficient": true,
-        "decision_card": true
+        "decision_card": true,
+        "execution_scope": "slice",
+        "continuation_mode": "attended_until_acceptance",
+        "stop_condition": "decision"
       }
     },
     {
@@ -193,7 +217,83 @@
         "role": "scout",
         "budget_exhausted": true,
         "evidence_sufficient": false,
-        "decision_card": true
+        "decision_card": true,
+        "execution_scope": "slice",
+        "continuation_mode": "attended_until_acceptance",
+        "stop_condition": "decision"
+      }
+    },
+    {
+      "id": "explicit-single-step-boundary",
+      "prompt": "Only inspect the named configuration file and report what is wrong; do not edit anything else.",
+      "policy_basis": [
+        "templates/agents-md.orchestration.md"
+      ],
+      "expected": {
+        "task_mode": "execute",
+        "intent_confidence": "clear",
+        "change_impact": "low",
+        "discovery_budget": "minimum",
+        "reversible": "yes",
+        "next_gate": "execution",
+        "abstain": false,
+        "approval_required": false,
+        "role": null,
+        "budget_exhausted": false,
+        "evidence_sufficient": true,
+        "decision_card": false,
+        "execution_scope": "step",
+        "continuation_mode": "attended_until_acceptance",
+        "stop_condition": "named_boundary"
+      }
+    },
+    {
+      "id": "explicit-bounded-slice-boundary",
+      "prompt": "Update only the named module and its tests, then stop before touching documentation or deployment files.",
+      "policy_basis": [
+        "templates/agents-md.orchestration.md",
+        "templates/agents/executor.toml"
+      ],
+      "expected": {
+        "task_mode": "execute",
+        "intent_confidence": "clear",
+        "change_impact": "material",
+        "discovery_budget": "minimum",
+        "reversible": "partial",
+        "next_gate": "execution",
+        "abstain": false,
+        "approval_required": false,
+        "role": "executor",
+        "budget_exhausted": false,
+        "evidence_sufficient": true,
+        "decision_card": false,
+        "execution_scope": "slice",
+        "continuation_mode": "attended_until_acceptance",
+        "stop_condition": "named_boundary"
+      }
+    },
+    {
+      "id": "explicit-unattended-outcome",
+      "prompt": "Finish the approved local refactor through its tests while I am away, and stop when the acceptance check passes.",
+      "policy_basis": [
+        "templates/agents-md.orchestration.md"
+      ],
+      "expected": {
+        "task_mode": "execute",
+        "intent_confidence": "clear",
+        "change_impact": "low",
+        "discovery_budget": "minimum",
+        "reversible": "yes",
+        "next_gate": "execution",
+        "abstain": false,
+        "approval_required": false,
+        "role": null,
+        "budget_exhausted": false,
+        "evidence_sufficient": true,
+        "decision_card": false,
+        "execution_scope": "outcome",
+        "continuation_mode": "explicit_unattended",
+        "stop_condition": "acceptance"
       }
     }
   ]

@@ -1,5 +1,5 @@
 <!-- pilotfish-codex:begin -->
-<!-- pilotfish-codex v1.8.0-rc.3 -->
+<!-- pilotfish-codex v1.8.0-rc.4 -->
 <!-- markdownlint-disable-next-line MD041 -->
 ### Pilotfish always-on bootstrap
 
@@ -14,6 +14,12 @@ Pilotfish supplements them and does not replace their precedence boundary.
 - `mech-executor` and `scout` are baseline-only: keep their installed Luna
   bindings, never request Astra, and route to `executor` or `verifier` when
   work exceeds their boundary instead of upgrading the child in place.
+- Treat a clear request to fix or complete something as one outcome: continue
+  through its necessary commands, phases, and verification until acceptance.
+  Phase updates do not require approval; explicit “only this step/slice” wording
+  remains a named stop boundary.
+- Use `AUTO`/`ASK` only for explicit unattended continuation. Preserve material
+  approval, security, release, destructive, external, and irreversible gates.
 - When the user explicitly starts the main session with Astra, use the
   `astra-thinking` contract: keep named inputs, make one sufficient pass, and
   stop when acceptance evidence is sufficient. Delegate mechanical or

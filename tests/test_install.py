@@ -150,7 +150,8 @@ class NativeConfigMergeTests(unittest.TestCase):
         self.assertEqual(data["model_reasoning_effort"], "medium")
         self.assertEqual(data["plan_mode_reasoning_effort"], "xhigh")
         self.assertTrue(data["features"]["default_mode_request_user_input"])
-        self.assertEqual(data["max_concurrent_threads_per_session"], 3)
+        self.assertEqual(data["agents"]["max_concurrent_threads_per_session"], 3)
+        self.assertNotIn("max_concurrent_threads_per_session", data)
         self.assertNotIn("multi_agent_v2", data.get("features", {}))
 
     def test_existing_root_model_and_effort_are_preserved(self) -> None:
@@ -170,7 +171,7 @@ class NativeConfigMergeTests(unittest.TestCase):
             merge_config_text(old)
         migrated, _ = merge_config_text(old, migration_proven=True)
         migrated_data = tomllib.loads(migrated)
-        self.assertEqual(migrated_data["max_concurrent_threads_per_session"], 3)
+        self.assertEqual(migrated_data["agents"]["max_concurrent_threads_per_session"], 3)
         self.assertTrue(migrated_data["features"]["default_mode_request_user_input"])
         for text in ("[features]\nmulti_agent_v2 = false\n", "[features.multi_agent_v2]\nenabled = false\n", "[features]\nmulti_agent_v2 = true\n"):
             with self.subTest(text=text):
@@ -181,9 +182,15 @@ class NativeConfigMergeTests(unittest.TestCase):
         for value in (0, 8, 9, '"4"'):
             with self.subTest(value=value):
                 with self.assertRaises(InstallAbort):
-                    merge_config_text(f"max_concurrent_threads_per_session = {value}\n")
+                    merge_config_text(f"[agents]\nmax_concurrent_threads_per_session = {value}\n")
         with self.assertRaises(InstallAbort):
-            merge_config_text("max_concurrent_threads_per_session = 2\n")
+            merge_config_text("[agents]\nmax_concurrent_threads_per_session = 2\n")
+
+    def test_migrates_legacy_root_concurrency_to_agents_table(self) -> None:
+        rendered, _ = merge_config_text("max_concurrent_threads_per_session = 3\n")
+        data = tomllib.loads(rendered)
+        self.assertEqual(data["agents"]["max_concurrent_threads_per_session"], 3)
+        self.assertNotIn("max_concurrent_threads_per_session", data)
 
     def test_existing_decision_card_setting_is_enabled(self) -> None:
         rendered, _ = merge_config_text(
@@ -192,14 +199,14 @@ class NativeConfigMergeTests(unittest.TestCase):
         )
         self.assertTrue(tomllib.loads(rendered)["features"]["default_mode_request_user_input"])
 
-    def test_agents_table_is_exact_and_rejects_legacy_or_unknown_keys(self) -> None:
-        for text in (
-            "[agents]\nmax_concurrent_threads_per_session = 3\n",
-            "[agents]\nmax_threads = 3\n",
-        ):
-            with self.subTest(text=text):
-                with self.assertRaises(InstallAbort):
-                    merge_config_text(text)
+    def test_agents_table_accepts_canonical_and_rejects_alias(self) -> None:
+        rendered, _ = merge_config_text("[agents]\nmax_concurrent_threads_per_session = 3\n")
+        self.assertEqual(
+            tomllib.loads(rendered)["agents"],
+            {"max_concurrent_threads_per_session": 3},
+        )
+        with self.assertRaises(InstallAbort):
+            merge_config_text("[agents]\nmax_threads = 3\n")
 
     def test_unowned_legacy_key_is_preserved(self) -> None:
         original = "custom = true\n"
@@ -211,7 +218,7 @@ class NativeConfigMergeTests(unittest.TestCase):
         rendered, _ = merge_config_text(original, owned_legacy=frozenset({"features.multi_agent"}))
         data = tomllib.loads(rendered)
         self.assertNotIn("multi_agent", data["features"])
-        self.assertEqual(data["max_concurrent_threads_per_session"], 3)
+        self.assertEqual(data["agents"]["max_concurrent_threads_per_session"], 3)
 
     def test_version_parser_does_not_hard_pin_releases(self) -> None:
         self.assertEqual(parse_codex_version("codex 0.146.0"), (0, 146, 0))
@@ -287,7 +294,7 @@ class NativeInstallTests(unittest.TestCase):
             self.assertEqual((home / "config.toml").read_bytes(), before)
             self.assertEqual(self.run_install(home), 0)
             data = tomllib.loads((home / "config.toml").read_text())
-            self.assertEqual(data["max_concurrent_threads_per_session"], 3)
+            self.assertEqual(data["agents"]["max_concurrent_threads_per_session"], 3)
 
     def test_legacy_v2_migration_allows_canonical_security_reviewer_upgrade(self) -> None:
         previous = ROOT / "install" / "previous" / "v1.3.0" / "agents" / "security-reviewer.toml"
@@ -325,7 +332,7 @@ class NativeInstallTests(unittest.TestCase):
             home = Path(directory) / "home"
             self.assertEqual(self.run_install(home), 0)
             config = tomllib.loads((home / "config.toml").read_text())
-            self.assertEqual(config["max_concurrent_threads_per_session"], 3)
+            self.assertEqual(config["agents"]["max_concurrent_threads_per_session"], 3)
             self.assertEqual({p.stem for p in (home / "agents").glob("*.toml")}, {"executor", "mech-executor", "plan-verifier", "scout", "security-executor", "security-reviewer", "verifier"})
             state = home.with_name(f"{home.name}.pilotfish-install-state.json")
             recorded = json.loads(state.read_text())
@@ -995,7 +1002,7 @@ class NativeInstallTests(unittest.TestCase):
                     if path.is_file()
                 }
 
-                expected_error = "conflicts"
+                expected_error = "stale"
                 with self.assertRaisesRegex(InstallAbort, expected_error):
                     self.run_install(home)
 

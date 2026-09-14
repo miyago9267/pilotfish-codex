@@ -19,7 +19,8 @@ class NativeTemplateTests(unittest.TestCase):
         self.assertEqual(config["model_reasoning_effort"], "medium")
         self.assertEqual(config["plan_mode_reasoning_effort"], "xhigh")
         self.assertTrue(config["features"]["default_mode_request_user_input"])
-        self.assertEqual(config["max_concurrent_threads_per_session"], 3)
+        self.assertEqual(config["agents"]["max_concurrent_threads_per_session"], 3)
+        self.assertNotIn("max_concurrent_threads_per_session", config)
         self.assertNotIn("multi_agent_v2", config.get("features", {}))
         errors, warnings = validate_agents_config(config)
         self.assertEqual(errors, [])
@@ -61,7 +62,7 @@ class NativeTemplateTests(unittest.TestCase):
                 self.assertNotEqual(tomllib.load(handle).get("model"), "gpt-5.6-terra")
 
     def test_rejects_forced_adapter_keys_and_duplicate_names(self) -> None:
-        config = {"features": {"multi_agent_v2": {"enabled": True, "max_concurrent_threads_per_session": 4, "tool_namespace": "agents"}}, "max_concurrent_threads_per_session": 3}
+        config = {"features": {"multi_agent_v2": {"enabled": True, "max_concurrent_threads_per_session": 4, "tool_namespace": "agents"}}, "agents": {"max_concurrent_threads_per_session": 3}}
         errors, _ = validate_agents_config(config)
         self.assertTrue(any("legacy features.multi_agent_v2" in item for item in errors))
         with tempfile.TemporaryDirectory() as directory:
@@ -73,7 +74,7 @@ class NativeTemplateTests(unittest.TestCase):
             self.assertTrue(any("manifest missing" in item for item in problems))
 
     def test_validator_rejects_nonpackaged_agents_keys(self) -> None:
-        config = {"max_concurrent_threads_per_session": 3, "agents": {"max_depth": 1}}
+        config = {"agents": {"max_concurrent_threads_per_session": 3, "max_depth": 1}}
         errors, _ = validate_agents_config(config)
         self.assertTrue(any("unsupported inline role" in item for item in errors))
 
@@ -127,6 +128,12 @@ class NativeTemplateTests(unittest.TestCase):
             "`CONTINUE`",
             "`PIVOT`",
             "`ROLLBACK`",
+            "Outcome-level continuation",
+            "`execution_scope`",
+            "`continuation_mode`",
+            "`stop_condition`",
+            "phase boundary is progress reporting",
+            "presence gates for likely long unattended work",
         ):
             self.assertIn(phrase, policy)
 

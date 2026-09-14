@@ -1,0 +1,239 @@
+{
+  "schema_version": 1,
+  "status": "active",
+  "manifest_immutable": true,
+  "update_protocol": "Run validate_prompt_lock.py --allow-lock-update only for an explicitly approved policy renewal; normal changes must leave LOCK.json unchanged.",
+  "base_diff": "Compare protected surfaces with the Git base revision after this manifest exists in the base.",
+  "version_gate": {
+    "path": "VERSION",
+    "require_change_for_protected_surfaces": true
+  },
+  "surfaces": [
+    {
+      "id": "bootstrap-policy",
+      "path": "templates/agents-md.bootstrap.md",
+      "max_lines": 48,
+      "max_bytes": 3000,
+      "max_changed_lines": 8,
+      "max_changed_characters": 800,
+      "max_change_ratio": 0.2,
+      "required_fragments": [
+        "Treat a clear request to fix or complete something as one outcome",
+        "Phase updates do not require approval",
+        "AUTO`/`ASK` only for explicit unattended continuation",
+        "material approval, security, release, destructive, external, and irreversible gates"
+      ]
+    },
+    {
+      "id": "orchestration-template",
+      "path": "templates/agents-md.orchestration.md",
+      "max_lines": 700,
+      "max_bytes": 43000,
+      "max_changed_lines": 24,
+      "max_changed_characters": 2400,
+      "max_change_ratio": 0.1,
+      "required_fragments": [
+        "Outcome-level continuation",
+        "`execution_scope`",
+        "phase boundary is progress reporting",
+        "presence gates for likely long unattended work",
+        "material approval, security, release, destructive, external, or irreversible gates"
+      ]
+    },
+    {
+      "id": "packaged-orchestration-policy",
+      "path": "plugin/plugins/pilotfish-codex/skills/pilotfish-orchestration/references/orchestration-policy.md",
+      "max_lines": 700,
+      "max_bytes": 43000,
+      "max_changed_lines": 24,
+      "max_changed_characters": 2400,
+      "max_change_ratio": 0.1,
+      "required_fragments": [
+        "Outcome-level continuation",
+        "`execution_scope`",
+        "phase boundary is progress reporting",
+        "presence gates for likely long unattended work",
+        "material approval, security, release, destructive, external, or irreversible gates"
+      ]
+    },
+    {
+      "id": "orchestration-skill",
+      "path": "plugin/plugins/pilotfish-codex/skills/pilotfish-orchestration/SKILL.md",
+      "max_lines": 100,
+      "max_bytes": 4700,
+      "max_changed_lines": 12,
+      "max_changed_characters": 1200,
+      "max_change_ratio": 0.2,
+      "required_fragments": [
+        "bounded task routing",
+        "fresh-context verification",
+        "CONFIRMED",
+        "REFUTED",
+        "INCONCLUSIVE"
+      ]
+    },
+    {
+      "id": "plugin-agent-prompt",
+      "path": "plugin/plugins/pilotfish-codex/skills/pilotfish-orchestration/agents/openai.yaml",
+      "max_lines": 14,
+      "max_bytes": 900,
+      "max_changed_lines": 4,
+      "max_changed_characters": 500,
+      "max_change_ratio": 0.35,
+      "required_fragments": [
+        "Use Pilotfish orchestration for this task",
+        "user explicitly started an Astra main session",
+        "unchanged approval gates"
+      ]
+    },
+    {
+      "id": "plugin-manifest-description",
+      "path": "plugin/plugins/pilotfish-codex/.codex-plugin/plugin.json",
+      "max_lines": 35,
+      "max_bytes": 2200,
+      "max_changed_lines": 6,
+      "max_changed_characters": 800,
+      "max_change_ratio": 0.2,
+      "required_fragments": [
+        "Hybrid Pilotfish orchestration",
+        "Pilotfish orchestration workflow",
+        "fresh-context verification",
+        "Apply Pilotfish orchestration to this task."
+      ]
+    },
+    {
+      "id": "executor-agent",
+      "path": "templates/agents/executor.toml",
+      "max_lines": 30,
+      "max_bytes": 3000,
+      "max_changed_lines": 8,
+      "max_changed_characters": 1000,
+      "max_change_ratio": 0.2,
+      "required_fragments": [
+        "cannot delegate",
+        "implement the simplest thing that fully works",
+        "verify by exercising the change"
+      ]
+    },
+    {
+      "id": "mechanical-executor-agent",
+      "path": "templates/agents/mech-executor.toml",
+      "max_lines": 35,
+      "max_bytes": 3000,
+      "max_changed_lines": 8,
+      "max_changed_characters": 1000,
+      "max_change_ratio": 0.2,
+      "required_fragments": [
+        "fully-specified tasks",
+        "no scope expansion",
+        "stop and report"
+      ]
+    },
+    {
+      "id": "plan-verifier-agent",
+      "path": "templates/agents/plan-verifier.toml",
+      "max_lines": 60,
+      "max_bytes": 3100,
+      "max_changed_lines": 12,
+      "max_changed_characters": 1600,
+      "max_change_ratio": 0.2,
+      "required_fragments": [
+        "read-only leaf Plan verifier",
+        "READY",
+        "REVISE",
+        "Never execute mutating commands"
+      ]
+    },
+    {
+      "id": "scout-agent",
+      "path": "templates/agents/scout.toml",
+      "max_lines": 25,
+      "max_bytes": 1300,
+      "max_changed_lines": 8,
+      "max_changed_characters": 900,
+      "max_change_ratio": 0.25,
+      "required_fragments": [
+        "read-only scout",
+        "Never edit",
+        "exactly what you searched"
+      ]
+    },
+    {
+      "id": "security-executor-agent",
+      "path": "templates/agents/security-executor.toml",
+      "max_lines": 35,
+      "max_bytes": 2500,
+      "max_changed_lines": 8,
+      "max_changed_characters": 1000,
+      "max_change_ratio": 0.2,
+      "required_fragments": [
+        "Accept only an approved,\nstable implementation contract",
+        "never weaken an existing control",
+        "human security review"
+      ]
+    },
+    {
+      "id": "security-reviewer-agent",
+      "path": "templates/agents/security-reviewer.toml",
+      "max_lines": 35,
+      "max_bytes": 1800,
+      "max_changed_lines": 10,
+      "max_changed_characters": 1300,
+      "max_change_ratio": 0.2,
+      "required_fragments": [
+        "read-only leaf security reviewer",
+        "Never modify files or external state",
+        "minimum remediation"
+      ]
+    },
+    {
+      "id": "verifier-agent",
+      "path": "templates/agents/verifier.toml",
+      "max_lines": 95,
+      "max_bytes": 6000,
+      "max_changed_lines": 16,
+      "max_changed_characters": 2200,
+      "max_change_ratio": 0.2,
+      "required_fragments": [
+        "independent leaf verifier",
+        "CONFIRMED",
+        "REFUTED",
+        "INCONCLUSIVE",
+        "Never plan, edit, or fix anything"
+      ]
+    },
+    {
+      "id": "hook-description",
+      "path": "templates/hooks.json",
+      "max_lines": 36,
+      "max_bytes": 1500,
+      "max_changed_lines": 4,
+      "max_changed_characters": 500,
+      "max_change_ratio": 0.25,
+      "required_fragments": [
+        "Pilotfish automatic typed Plan-review gate."
+      ]
+    },
+    {
+      "id": "install-prompt",
+      "path": "INSTALL_PROMPT.md",
+      "max_lines": 30,
+      "max_bytes": 1500,
+      "max_changed_lines": 8,
+      "max_changed_characters": 900,
+      "max_change_ratio": 0.2,
+      "required_fragments": [
+        "Read `INSTALL.md` completely",
+        "Stop for my explicit approval before writing the home",
+        "Do not assume `main`",
+        "Keep the installed default Luna/Sol policy unchanged"
+      ]
+    }
+  ],
+  "mirrors": [
+    {
+      "left": "templates/agents-md.orchestration.md",
+      "right": "plugin/plugins/pilotfish-codex/skills/pilotfish-orchestration/references/orchestration-policy.md"
+    }
+  ]
+}

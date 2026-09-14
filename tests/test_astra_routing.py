@@ -122,7 +122,7 @@ class AstraMainSessionContractTests(unittest.TestCase):
             "codex --model gpt-6-astra",
             '-c model_reasoning_effort="high"',
             '-c plan_mode_reasoning_effort="high"',
-            "-c max_concurrent_threads_per_session=1",
+            "-c agents.max_concurrent_threads_per_session=1",
         ):
             self.assertIn(token, command_sources)
         self.assertIn("session-only", command_sources)
@@ -142,7 +142,7 @@ class AstraMainSessionContractTests(unittest.TestCase):
                 "-c",
                 f'plan_mode_reasoning_effort="{ASTRA_PLAN_EFFORT}"',
                 "-c",
-                f"max_concurrent_threads_per_session={ASTRA_CHILD_CONCURRENCY}",
+                f"agents.max_concurrent_threads_per_session={ASTRA_CHILD_CONCURRENCY}",
             ),
         )
 

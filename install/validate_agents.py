@@ -26,6 +26,7 @@ REASONING_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 AGENTS_CONCURRENCY_MIN = 1
 AGENTS_CONCURRENCY_MAX = 8
 AGENTS_CONCURRENCY_RECOMMENDED = 3
+AGENTS_CONCURRENCY_KEY = "max_concurrent_threads_per_session"
 
 
 def validate_agent(data: dict) -> list[str]:
@@ -52,7 +53,7 @@ def validate_agent(data: dict) -> list[str]:
 
 
 def validate_agents_config(config: dict) -> tuple[list[str], list[str]]:
-    """Validate Codex 0.147's root-level child concurrency setting."""
+    """Validate Codex's [agents] child concurrency setting."""
     errors: list[str] = []
     warnings: list[str] = []
     features = config.get("features", {})
@@ -66,13 +67,17 @@ def validate_agents_config(config: dict) -> tuple[list[str], list[str]]:
     if not isinstance(agents, dict):
         errors.append("agents must be a role table")
         return errors, warnings
-    if agents:
+    if set(agents) - {AGENTS_CONCURRENCY_KEY}:
         errors.append("agents table has unsupported inline role keys")
-    concurrency = config.get("max_concurrent_threads_per_session")
+    concurrency = agents.get(AGENTS_CONCURRENCY_KEY)
     if type(concurrency) is not int or not AGENTS_CONCURRENCY_MIN <= concurrency <= AGENTS_CONCURRENCY_MAX:
-        errors.append("root concurrency must be an integer from 1 to 8")
+        errors.append("agents.max_concurrent_threads_per_session must be an integer from 1 to 8")
     elif concurrency != AGENTS_CONCURRENCY_RECOMMENDED:
-        warnings.append(f"root concurrency {concurrency} is normalized by the installer to 3")
+        warnings.append(
+            f"agents.max_concurrent_threads_per_session {concurrency} is normalized by the installer to 3"
+        )
+    if AGENTS_CONCURRENCY_KEY in config:
+        errors.append("root concurrency key must be moved under [agents]")
     return errors, warnings
 
 

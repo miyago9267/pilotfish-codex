@@ -80,7 +80,7 @@ intelligence ranking。完整 benchmark 与 bar charts 请查看
 codex --model gpt-6-astra \
   -c model_reasoning_effort="high" \
   -c plan_mode_reasoning_effort="high" \
-  -c max_concurrent_threads_per_session=1
+  -c agents.max_concurrent_threads_per_session=1
 ```
 
 `astra-thinking` 让 Astra 负责 synthesis、planning 与难判断；mechanical 和

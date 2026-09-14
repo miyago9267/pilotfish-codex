@@ -9,9 +9,10 @@ IDs, resume commands, and `Explore` shadowing are not Codex runtime claims.
 
 The active target is the native Codex contract, with `0.147.0` as the minimum
 compatibility floor; later releases are accepted after parsing and native
-contract validation. Child concurrency is a root-level setting:
+contract validation. Child concurrency is an `[agents]` setting:
 
 ```toml
+[agents]
 max_concurrent_threads_per_session = 3
 
 [features]
@@ -33,9 +34,9 @@ Migration provenance is an exact committed sidecar schema: `config.toml`, the
 seven canonical role paths, and the currently selected policy must be the only
 entries in both target maps, with matching SHA-256 fingerprints and original
 byte evidence. Missing, stale, extra, or malformed state, an unowned V2 key,
-or a conflicting root concurrency value aborts before writes. Dry-run reports only
-primary paths and the pending/committed sidecars plus backups for replaced
-targets; it creates none.
+or a conflicting `[agents]` concurrency value aborts before writes. Dry-run
+reports only primary paths and the pending/committed sidecars plus backups for
+replaced targets; it creates none.
 
 An explicit Astra main session is a zero-write, session-only preference. The
 user starts it with `gpt-6-astra`, `high` main and Plan effort, and one optional
@@ -134,6 +135,27 @@ preserve the card schema, affected scope, exclusions, approval boundary, and
 resume point. Unsupported, cancelled, timed-out, or invalid MCP responses fall
 back to the native card or concise text checkpoint.
 
+### Outcome-level continuation
+
+The unit of execution is the requested user-visible outcome, not one command,
+tool call, or checklist item. A clear `execute` request defaults to
+`execution_scope=outcome` and `continuation_mode=attended_until_acceptance`.
+The main session continues through necessary commands, phases, role handoffs,
+and verification; a phase update is progress reporting and does not ask for
+approval.
+
+Explicit “only this step”, “只檢查這個檔案”, or “只改這個 module” wording
+selects `step` or `slice` and stops at that named boundary. Unclear product
+direction uses the smallest reversible slice and stops for a `decision`.
+Acceptance stops the requested outcome. Approval, security, release,
+destructive, external, and irreversible gates stop at `material_gate` before
+acceptance. Work after acceptance is limited to the requested outcome and its
+acceptance evidence.
+
+The internal contract records `execution_scope`, `continuation_mode`, and
+`stop_condition`. The offline evaluator checks these fields as semantic policy
+evidence; it does not prove that every live model or host will comply.
+
 Direction checks reuse the existing `verifier` role through an explicit
 `direction_checkpoint` contract. `CONTINUE` preserves the path, `PIVOT`
 requires a bounded re-plan, and `ROLLBACK` stops new writes and identifies the
@@ -145,12 +167,14 @@ live model routing or native dispatch.
 
 ### Long autonomous runs
 
-Before likely long work, the main session announces `AUTO` or `ASK`; absence is
-not authority, and `/goal` preserves only the objective. `AUTO` covers approved,
-reversible scope and P2 adjudication, not new version-control, publish, install,
-credential, destructive, external, scope, or spending authority. `ASK` uses
-Codex `request_user_input` only when exposed, may use the optional MCP bridge
-when configured, and otherwise pauses the turn.
+`AUTO`/`ASK` is required for likely long unattended work. An attended task with
+clear scope continues through its outcome without selecting a mode merely
+because it has many commands or phases. Absence, sleeping, or leaving the
+agent alone is not authority; explicit “continue while I am away” selects
+`AUTO`. `AUTO` covers approved, reversible scope and P2 adjudication, not new
+version-control, publish, install, credential, destructive, external, scope,
+or spending authority. `ASK` uses Codex `request_user_input` only when exposed,
+may use the optional MCP bridge when configured, and otherwise pauses the turn.
 
 Normal recovery is one targeted recheck of the original reproduction plus a
 bounded basic regression. Five materially changed P1/P2 passes remain an

@@ -24,7 +24,12 @@ from typing import Any, Iterable, Mapping
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from install import codex_version_token, parse_codex_version
-from validate_agents import ROLES, validate_agent
+from validate_agents import (
+    AGENTS_CONCURRENCY_KEY,
+    AGENTS_CONCURRENCY_RECOMMENDED,
+    ROLES,
+    validate_agent,
+)
 from stage_smoke_home import (
     StageError,
     _active_hook_state,
@@ -532,7 +537,13 @@ def validate_stage_layout(home: Path, *, active_home: bool = False) -> str | Non
             or features.get("default_mode_request_user_input") is not True
         ):
             return "legacy_key_unowned"
-        if not isinstance(agents_config, dict) or agents_config or config.get("max_concurrent_threads_per_session") != 3:
+        if (
+            not isinstance(agents_config, dict)
+            or set(agents_config) != {AGENTS_CONCURRENCY_KEY}
+            or type(agents_config.get(AGENTS_CONCURRENCY_KEY)) is not int
+            or agents_config[AGENTS_CONCURRENCY_KEY] != AGENTS_CONCURRENCY_RECOMMENDED
+            or AGENTS_CONCURRENCY_KEY in config
+        ):
             return "role_layer_unapproved"
         if active_home:
             project_config_bytes(config_content)

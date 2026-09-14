@@ -100,7 +100,7 @@ session with launch-time overrides:
 codex --model gpt-6-astra \
   -c model_reasoning_effort="high" \
   -c plan_mode_reasoning_effort="high" \
-  -c max_concurrent_threads_per_session=1
+  -c agents.max_concurrent_threads_per_session=1
 ```
 
 The overrides are zero-write and session-only; the installed Luna/Sol config,
@@ -203,6 +203,7 @@ prompt is in [INSTALL_PROMPT.md](./INSTALL_PROMPT.md).
 | Topic | Document |
 | --- | --- |
 | Design and policy boundaries | [docs/design.md](./docs/design.md) |
+| Prompt/document lock | [lock spec](./docs/specs/prompt-document-lock/SPEC.md) |
 | Adaptive routing design | [EXPERIMENT.md](./docs/specs/adaptive-intent-routing/EXPERIMENT.md) |
 | Adaptive routing results | [EXPERIMENT-RESULTS.md](./docs/specs/adaptive-intent-routing/EXPERIMENT-RESULTS.md) |
 | Live experiment protocol | [LIVE-EXPERIMENT.md](./docs/specs/adaptive-intent-routing/LIVE-EXPERIMENT.md) |
@@ -217,6 +218,7 @@ prompt is in [INSTALL_PROMPT.md](./INSTALL_PROMPT.md).
 ```bash
 bun install --frozen-lockfile
 bun run lint:md
+python3 install/validate_prompt_lock.py --base-ref HEAD
 python3 -m unittest discover -s tests -v
 ```
 

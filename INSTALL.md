@@ -45,7 +45,7 @@ root session, start Codex with launch-time overrides instead of editing
 codex --model gpt-6-astra \
   -c model_reasoning_effort="high" \
   -c plan_mode_reasoning_effort="high" \
-  -c max_concurrent_threads_per_session=1
+  -c agents.max_concurrent_threads_per_session=1
 ```
 
 This activation is zero-write and session-only. The prompt keeps Astra on

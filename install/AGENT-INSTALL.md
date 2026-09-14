@@ -12,6 +12,7 @@ fallback.
 - The native configuration is exactly:
 
 ```toml
+[agents]
 max_concurrent_threads_per_session = 3
 
 [features]
@@ -73,10 +74,11 @@ unchanged. Conflicting `[agents]` values and extra V2 keys abort as well.
 Unrelated config and custom same-name role bytes remain untouched.
 
 The installer refuses disabled or scalar legacy V2 forms, inline/dotted forms,
-and malformed/conflicting `[agents]` values. Fresh homes receive the root
-concurrency key and an active managed bootstrap block in `AGENTS.md`; migration
-removes only the exact proven old V2 table. Existing user policy bytes outside
-the managed block are preserved byte-for-byte.
+and malformed/conflicting `[agents]` values. Fresh homes receive the
+`[agents].max_concurrent_threads_per_session` key and an active managed
+bootstrap block in `AGENTS.md`; migration removes only the exact proven old V2
+table. Existing user policy bytes outside the managed block are preserved
+byte-for-byte.
 
 The sidecar is state version 3 for ordinary installs and records Plugin name,
 version, source digest, and `installed` or `unavailable` status. A reconciled

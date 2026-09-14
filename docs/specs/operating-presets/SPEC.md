@@ -3,7 +3,7 @@ id: spec-operating-presets
 title: Operating presets for capability-aware Pilotfish routing
 status: draft
 created: 2026-09-10
-updated: 2026-09-10
+updated: 2026-09-12
 author: Miyago
 approved_by:
 tags: [routing, presets, usage, cost, astra]
@@ -37,6 +37,9 @@ priority: high
   must not create an Astra dispatch.
 - Keep the no-preset behavior byte- and policy-compatible with the current
   Luna/Sol routing until this contract is implemented and evaluated.
+- Treat a clear request to fix or complete something as one outcome. Phase
+  boundaries report progress and do not create approval pauses; explicit
+  step/slice wording remains a named stop boundary.
 - Use offline deterministic tests for the first implementation. Do not add a
   paid or live Astra cohort until the preset semantics and cost guard are
   stable.
@@ -57,8 +60,53 @@ The routing decision has four ordered layers:
 
 The preset projection may set model candidate order, effort ceiling, optional
 review/retry behavior, discovery and evidence budgets, safe fan-out, and the
-stop condition. It must not rewrite role TOMLs, native typed dispatch, or
-permission boundaries.
+stop condition. The default execution contract is
+`execution_scope=outcome` with `continuation_mode=attended_until_acceptance`;
+`AUTO`/`ASK` applies only to explicit unattended continuation. It must not
+rewrite role TOMLs, native typed dispatch, or permission boundaries.
+
+### Current routing diagram
+
+The diagram describes the installed `v1.8.0-rc.4` boundary. Preset branches are
+draft policy projections; they do not change runtime routing until S1-S2 pass.
+
+```mermaid
+flowchart TD
+    request["User request"] --> signals["Intent, impact, authority, capability"]
+    signals --> safety{"Mandatory safety and authority gates"}
+    safety -- "blocked" --> stop["Fail closed / wait / re-plan"]
+    safety -- "eligible" --> model{"Explicit model/session choice"}
+    model -- "invalid or unavailable" --> stop
+    model -- "Astra main opt-in" --> main_astra["Astra main session<br/>Session-scoped, one sufficient pass"]
+    model -- "Luna/Sol or no override" --> preset{"Operating preset"}
+    preset -- "none" --> default["Current Luna/Sol default"]
+    preset -- "economy" --> economy["Luna-first<br/>Optional Astra off"]
+    preset -- "fast" --> fast["Latency-first<br/>Bounded discovery"]
+    preset -- "precise" --> precise["Evidence floor<br/>Bounded retry"]
+    preset -- "quality" --> quality["Strict review<br/>Fresh verification"]
+    main_astra --> preset
+    default --> surface
+    economy --> surface
+    fast --> surface
+    precise --> surface
+    quality --> surface
+    surface --> role{"Work surface / trigger"}
+    role -- "routine or pure judgment" --> current["Current role binding<br/>Luna/Sol"]
+    role -- "mechanical or reconnaissance" --> baseline["mech-executor / scout<br/>Luna-only"]
+    role -- "plan review" --> plan["plan-verifier<br/>gpt-5.6-sol @ high"]
+    role -- "tool, MCP, computer-use, or cross-system" --> candidate["Conditional Astra candidate<br/>executor / verifier / security-reviewer"]
+    role -- "fingerprinted disagreement" --> adjudicator["One Astra @ high adjudication<br/>Then stop"]
+    role -- "approved security implementation" --> security["security-executor<br/>Existing security boundary"]
+    current --> gates["Approval, security, release,<br/>and fresh-verifier gates"]
+    baseline --> gates
+    plan --> gates
+    candidate --> gates
+    adjudicator --> gates
+    security --> gates
+    gates --> acceptance{"Acceptance evidence sufficient?"}
+    acceptance -- "yes" --> accepted["Accepted outcome"]
+    acceptance -- "no or capability gap" --> stop
+```
 
 ### Preset contract
 
@@ -75,6 +123,22 @@ while `economy` minimizes model and call usage even when the task takes longer.
 `precise` raises the evidence floor. `quality` permits the fullest review path;
 neither label is a promise that Astra is superior for pure reasoning.
 
+### Outcome-level continuation contract
+
+The route records three internal fields alongside the existing intent and risk
+signals:
+
+| Field | Values | Default behavior |
+| --- | --- | --- |
+| `execution_scope` | `step`, `slice`, `outcome` | Clear `execute` requests use `outcome`; explicit limited wording selects `step` or `slice`. |
+| `continuation_mode` | `attended_until_acceptance`, `explicit_unattended` | An attended task continues without per-phase approval; unattended continuation requires explicit selection. |
+| `stop_condition` | `named_boundary`, `acceptance`, `material_gate`, `decision` | Acceptance ends a clear outcome; mandatory authority gates always take precedence. |
+
+The contract prevents both failure modes in the same layer: a command or phase
+cannot become an accidental user checkpoint, and acceptance cannot trigger
+unrequested cleanup or adjacent work. The offline evaluator measures this
+semantic contract only; it does not claim native host enforcement.
+
 ### Non-negotiable routing invariants
 
 - `plan-verifier` remains `gpt-5.6-sol@high` in every preset.
@@ -88,6 +152,8 @@ neither label is a promise that Astra is superior for pure reasoning.
 - Invalid preset or model input fails closed before work or dispatch receipt.
 - Advisory budgets remain advisory unless the host exposes a verified native
   enforcement mechanism. No invented config key is part of this slice.
+- `AUTO`/`ASK` is a presence gate for likely long unattended work, not a
+  per-command or per-phase approval workflow.
 
 ### Decisions
 

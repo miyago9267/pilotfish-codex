@@ -5,6 +5,7 @@ model_reasoning_effort = "medium"
 plan_mode_reasoning_effort = "xhigh"
 
 # Child concurrency: the root plus up to three children.
+[agents]
 max_concurrent_threads_per_session = 3
 
 [features]
@@ -16,7 +17,7 @@ default_mode_request_user_input = true
 # codex --model gpt-6-astra \
 #   -c model_reasoning_effort="high" \
 #   -c plan_mode_reasoning_effort="high" \
-#   -c max_concurrent_threads_per_session=1
+#   -c agents.max_concurrent_threads_per_session=1
 # The 12-call / 300-second Astra budget in the prompt is advisory, not a
 # provider-enforced quota. Remove the overrides and start a new session to use
 # the normal Luna/Sol policy.

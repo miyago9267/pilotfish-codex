@@ -1,5 +1,5 @@
 <!-- pilotfish-codex:begin -->
-<!-- pilotfish-codex v1.8.0-rc.3 -->
+<!-- pilotfish-codex v1.8.0-rc.4 -->
 <!-- markdownlint-disable-next-line MD041 -->
 ### Orchestration
 
@@ -48,7 +48,7 @@ The documented zero-write activation is:
 codex --model gpt-6-astra \
   -c model_reasoning_effort="high" \
   -c plan_mode_reasoning_effort="high" \
-  -c max_concurrent_threads_per_session=1
+  -c agents.max_concurrent_threads_per_session=1
 ```
 
 These are launch-time overrides; the base config, policy, role files, hooks,
@@ -138,6 +138,40 @@ Clear intent does not require `explore_then_plan` by itself: a bounded release
 request may remain `execute` with `next_gate=approval`. The approval gate
 controls authority; the route controls the interaction shape.
 
+#### Outcome-level continuation
+
+The execution unit is the requested user-visible outcome, not one command, one
+tool call, or one checklist item. Record these internal route fields:
+
+- `execution_scope`: `step`, `slice`, or `outcome`.
+- `continuation_mode`: `attended_until_acceptance` or `explicit_unattended`.
+- `stop_condition`: `named_boundary`, `acceptance`, `material_gate`, or
+  `decision`.
+
+For a clear `execute` request, default to `execution_scope=outcome` and
+`continuation_mode=attended_until_acceptance`. Continue through the necessary
+commands, phases, role handoffs, and verification until acceptance evidence is
+sufficient. Reporting a phase boundary is progress reporting; it is not a
+request for approval or a reason to pause.
+
+Explicit wording such as “only inspect this file”, “先做這一步”, or “只改這個
+module” selects `step` or `slice` and stops at that named boundary. Wording such
+as “finish”, “fix”, or “complete” selects the requested outcome. If the product
+direction is unclear, use the smallest reversible slice and stop at `decision`.
+
+Material approval, security, release, destructive, external, or irreversible
+gates always take precedence over the continuation scope and stop at
+`material_gate`. Acceptance stops the requested outcome. After acceptance, do
+not add cleanup, refactoring, documentation, or adjacent hardening that the
+user did not request.
+
+`AUTO` and `ASK` are presence gates for likely long unattended work, not a
+per-command or per-phase approval workflow. An attended task with clear scope
+continues under the existing authorization even when it requires many commands
+or phases. `explicit_unattended` is selected only after the user explicitly
+requests continuation while away; a headless or unattended run without that
+selection pauses before starting the affected work.
+
 #### Turn-scoped review intent
 
 Keep `review_intent` separate from `task_mode`. A clear explicit preference in
@@ -185,6 +219,10 @@ Record these logical signals in the internal route decision:
 - `blocking_decisions`: a bounded list of user choices that can change the
   outcome, authority, risk, or acceptance.
 - `next_gate`: `discovery`, `approval`, `execution`, or `direction_check`.
+- `execution_scope`: `step`, `slice`, or `outcome`.
+- `continuation_mode`: `attended_until_acceptance` or `explicit_unattended`.
+- `stop_condition`: `named_boundary`, `acceptance`, `material_gate`, or
+  `decision`.
 
 Discovery has both a grounding floor and a stopping ceiling. Use one logical
 discovery unit for a targeted inspection, search, or reversible probe; combine
@@ -516,14 +554,16 @@ work unless it is P0/P1, security-relevant, or an introduced P2 regression.
 
 Severity rules apply to every verification run. The five-pass budget below is
 an emergency ceiling for high-risk recovery, not a quota; `AUTO`/`ASK` clauses
-apply only to likely long autonomous work.
+apply only to likely long unattended work.
 
-Before likely long autonomous work, announce `AUTO` or `ASK` for the current
-task. Sleeping, eating, or leaving the agent alone is not authority to continue:
-offer the modes and wait. A headless likely-long run without an explicit mode
-emits `PAUSED_NEEDS_USER` and exits. Explicit “continue while I am away” selects
-`AUTO` and must be announced. `/goal` preserves the objective only; it selects
-neither mode nor broader authority.
+For an attended task with clear scope, continue through the requested outcome
+without asking for a mode merely because the work is likely to be long. Before
+likely long unattended work, offer `AUTO` or `ASK` for the current task and
+wait. Sleeping, eating, or leaving the agent alone is not authority to continue.
+A headless run without explicit unattended mode emits `PAUSED_NEEDS_USER` and
+exits. Explicit “continue while I am away” selects `AUTO` and must be
+announced. `/goal` preserves the objective only; it selects neither mode nor
+broader authority.
 
 `AUTO` permits only reversible work in approved scope and main-session P2
 adjudication. It grants no new version-control, publish, install, credential,

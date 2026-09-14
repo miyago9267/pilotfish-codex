@@ -2,7 +2,7 @@
 id: pilotfish-work-status
 title: Pilotfish Codex work status
 status: active
-updated: 2026-09-10
+updated: 2026-09-14
 owner: Miyago
 ---
 
@@ -12,23 +12,34 @@ owner: Miyago
 
 ## Current objective
 
-完成已核准的 Astra main-session budget slice：zero-write session activation、
-usage-aware prompt、Luna delegation 與 fail-closed offline validation。
+完成 outcome-level continuation slice：clear attended work 一路做到 acceptance，
+explicit step/slice 保留 named boundary，unattended continuation 需要明確 mode，
+並以 offline contract 與 fresh Luna smoke 驗證。
 
-## Current release candidate — v1.8.0-rc.3
+## Current release candidate — v1.8.0-rc.4
 
 - [x] Repo `VERSION`, Plugin manifest, installer constant, and policy markers
-  are synchronized to `1.8.0-rc.3`; the existing `v1.8.0-rc.2` tag remains
+  are synchronized to `1.8.0-rc.4`; the existing `v1.8.0-rc.2` tag remains
   immutable.
 - [x] Draft `docs/specs/operating-presets/SPEC.md` records the economy, fast,
   precise, and quality policy layer while preserving the default Luna/Sol
   routing and all mandatory gates.
-- [x] Install the unique `1.8.0-rc.3` Plugin into the local global Codex home
+- [x] Install the unique `1.8.0-rc.4` Plugin into the local global Codex home
   after the contained symlink and reconciliation dry-runs passed; the active
   policy symlink remains rooted at `/Users/miyago/dotfile/config/ai`.
-- [x] Verify the active Plugin cache hash matches the checkout, state-v4 is
-  committed with timestamped rollback backups, no pending sidecar exists, and
-  native role validation plus hook self-test pass.
+- [x] Verify the active Plugin is `1.8.0-rc.4`, the policy symlink remains rooted
+  at the canonical dotfile source, native role validation and hook self-test
+  pass, and fresh Luna smoke covers continuation plus explicit boundaries.
+- [x] Define outcome-level continuation: clear attended work runs to acceptance,
+  explicit step/slice wording stops at its named boundary, unattended mode
+  requires explicit selection, and material gates remain authoritative.
+- [x] Add `docs/specs/prompt-document-lock/LOCK.json` and
+  `install/validate_prompt_lock.py`: 15 prompt/description surfaces now have
+  required anchors, absolute size limits, bounded base diffs, and mirrored
+  policy enforcement in Python CI.
+- [x] Prompt lock verification passes: full offline suite `425 tests, 1
+  skipped`, lock validator covers 15 surfaces, and Markdown lint reports zero
+  errors.
 
 ## Previous release candidate — v1.8.0-rc.2
 
@@ -65,8 +76,8 @@ usage-aware prompt、Luna delegation 與 fail-closed offline validation。
 - [x] Full offline suite `405 passed, 1 skipped`、`py_compile`、strict
   config/role validation、Markdown lint `68 files / 0 errors` 與
   `git diff --check` 通過；fresh verifier 回傳 `CONFIRMED`。
-- [x] Changelog 已加入 Unreleased entry；版本與全域安裝維持獨立決策，未
-  自動升版或改寫 `/Users/miyago/.codex`。
+- [x] Changelog release entries、版本更新與 `/Users/miyago/.codex` 全域安裝
+  已依明確授權完成；active Orca config 另以 atomic migration 保留原始備份。
 
 ## Current follow-up — Operating presets
 
@@ -76,6 +87,13 @@ usage-aware prompt、Luna delegation 與 fail-closed offline validation。
   與所有 mandatory gates。
 - [ ] 實作離線 projection、precedence 與 fail-closed 測試；完成前不啟用
   preset runtime routing，也不增加付費 Astra 測試。
+
+## Current follow-up — Runtime compatibility
+
+- [x] Migrate child concurrency to
+  `[agents].max_concurrent_threads_per_session`; strict parser A/B verification
+  passes on `codex-cli 0.154.0`, and the old root key is rejected before task
+  work.
 
 ## Completed
 

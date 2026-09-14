@@ -68,7 +68,7 @@ The documented opt-in command is:
 codex --model gpt-6-astra \
   -c model_reasoning_effort="high" \
   -c plan_mode_reasoning_effort="high" \
-  -c max_concurrent_threads_per_session=1
+  -c agents.max_concurrent_threads_per_session=1
 ```
 
 These are session-only overrides. The base `$CODEX_HOME/config.toml`, active

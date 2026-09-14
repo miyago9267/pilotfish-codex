@@ -101,6 +101,26 @@ class PolicyTests(unittest.TestCase):
 
         self.assertNotIn("ask the user to approve every decision", policy)
 
+    def test_policy_runs_clear_outcomes_and_stops_at_explicit_boundaries(self) -> None:
+        policy = " ".join(
+            (ROOT / "templates" / "agents-md.orchestration.md").read_text(encoding="utf-8").split()
+        )
+        for phrase in (
+            "Outcome-level continuation",
+            "not one command, one tool call, or one checklist item",
+            "`execution_scope`",
+            "`continuation_mode`",
+            "`stop_condition`",
+            "default to `execution_scope=outcome`",
+            "Continue through the necessary commands, phases, role handoffs, and verification",
+            "Reporting a phase boundary is progress reporting",
+            "Explicit wording such as “only inspect this file”",
+            "After acceptance, do not add cleanup",
+            "presence gates for likely long unattended work",
+            "without asking for a mode merely because the work is likely to be long",
+        ):
+            self.assertIn(phrase, policy)
+
     def test_policy_keeps_parent_accountability_and_local_escape_hatches(self) -> None:
         policy = (ROOT / "templates" / "agents-md.orchestration.md").read_text(encoding="utf-8")
         policy = " ".join(policy.split())
@@ -360,7 +380,7 @@ class PolicyTests(unittest.TestCase):
             r"Never reverify the same complete identity",
         )
         self.assertIn(
-            "headless likely-long run without an explicit mode",
+            "headless run without explicit unattended mode",
             policy,
         )
         self.assertIn("not a new adjacent-hardening audit", policy)
