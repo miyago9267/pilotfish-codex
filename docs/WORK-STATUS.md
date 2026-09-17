@@ -2,7 +2,7 @@
 id: pilotfish-work-status
 title: Pilotfish Codex work status
 status: active
-updated: 2026-09-14
+updated: 2026-09-17
 owner: Miyago
 ---
 
@@ -12,14 +12,31 @@ owner: Miyago
 
 ## Current objective
 
-完成 outcome-level continuation slice：clear attended work 一路做到 acceptance，
-explicit step/slice 保留 named boundary，unattended continuation 需要明確 mode，
-並以 offline contract 與 fresh Luna smoke 驗證。
+收斂 active-role routing repair：有效 Orca `CODEX_HOME` 載入七個 native roles，
+主 session 對 bounded workstream 與必要 review 主動 dispatch，緊密 local work
+仍留在 parent；並以 offline contract 與 fresh-process evidence 保持驗證邊界。
 
-## Current release candidate — v1.8.0-rc.4
+## Current release candidate — v1.8.0-rc.5
+
+- [x] `VERSION`, Plugin manifest, installer constant, and policy markers are
+  synchronized to `1.8.0-rc.5`; the prompt lock remains unchanged and passes.
+- [x] Add `--roles-only` so a Codex home with externally co-managed policy or
+  hooks can receive only the seven native role TOMLs without changing config,
+  hooks, Plugin, or installer state.
+- [x] Update the canonical Codex adapter and bootstrap with proactive bounded
+  typed-role dispatch, parent-local tight work, outcome-level continuation, and
+  the existing Luna/Sol/Astra boundaries.
+- [x] Deploy and validate the seven exact role payloads under the effective Orca
+  home with mode `0600`; policy and hooks remain external symlinks.
+- [x] Offline verification: `429 tests`, `1 skipped`, prompt lock, strict config,
+  role validation, Python compile, shell syntax, mirror equality, and diff check.
+- [ ] Paid live named-role dispatch probe remains unrun; static setup proves role
+  availability and policy intent but does not prove automatic task-class choice.
+
+## Previous release candidate — v1.8.0-rc.4
 
 - [x] Repo `VERSION`, Plugin manifest, installer constant, and policy markers
-  are synchronized to `1.8.0-rc.4`; the existing `v1.8.0-rc.2` tag remains
+  were synchronized to `1.8.0-rc.4`; the existing `v1.8.0-rc.2` tag remains
   immutable.
 - [x] Draft `docs/specs/operating-presets/SPEC.md` records the economy, fast,
   precise, and quality policy layer while preserving the default Luna/Sol

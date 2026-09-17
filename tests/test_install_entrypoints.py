@@ -12,6 +12,7 @@ class InstallerEntrypointTests(unittest.TestCase):
         for wrapper in (posix, powershell):
             self.assertIn("install.py", wrapper)
             self.assertIn("--dry-run", wrapper)
+            self.assertIn("--roles-only", wrapper)
             self.assertIn("--ref", wrapper)
             self.assertIn("pilotfish-codex", wrapper)
 

@@ -34,6 +34,7 @@ from install import (  # noqa: E402
     codex_version_token,
     is_compatible_codex_output,
     install,
+    install_roles,
     is_parseable_codex_output,
     merge_config_text,
     parse_codex_version,
@@ -259,6 +260,97 @@ class NativeInstallTests(unittest.TestCase):
 
     def run_install(self, home: Path, **kwargs: object) -> int:
         return install(source_root=ROOT, codex_home=home, dry_run=False, check_codex=False, **kwargs)
+
+    def run_roles_only(self, home: Path, **kwargs: object) -> int:
+        return install_roles(
+            source_root=ROOT,
+            codex_home=home,
+            dry_run=False,
+            check_codex=False,
+            **kwargs,
+        )
+
+    def test_roles_only_ignores_co_managed_policy_and_hook_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            home.mkdir()
+            hook_target = root / "hooks"
+            hook_target.mkdir()
+            (hook_target / "existing.py").write_text("keep\n", encoding="utf-8")
+            (home / "hooks").symlink_to(hook_target, target_is_directory=True)
+            policy_target = root / "AGENTS.md"
+            policy_original = b"# user policy\n"
+            policy_target.write_bytes(policy_original)
+            (home / "AGENTS.md").symlink_to(policy_target)
+            config = home / "config.toml"
+            config_original = b"model = \"user-model\"\n"
+            config.write_bytes(config_original)
+
+            self.assertEqual(self.run_roles_only(home), 0)
+            self.assertEqual(
+                {path.stem for path in (home / "agents").glob("*.toml")},
+                set(installer.ROLES),
+            )
+            for role in installer.ROLES:
+                self.assertEqual(
+                    (home / "agents" / f"{role}.toml").read_bytes(),
+                    (ROOT / "templates" / "agents" / f"{role}.toml").read_bytes(),
+                )
+            self.assertTrue((home / "hooks").is_symlink())
+            self.assertEqual(policy_target.read_bytes(), policy_original)
+            self.assertEqual(config.read_bytes(), config_original)
+            self.assertFalse(
+                home.with_name(f"{home.name}.pilotfish-install-state.json").exists()
+            )
+
+    def test_roles_only_dry_run_does_not_create_runtime_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            home.mkdir()
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(
+                    install_roles(
+                        source_root=ROOT,
+                        codex_home=home,
+                        dry_run=True,
+                        check_codex=False,
+                    ),
+                    0,
+                )
+            self.assertIn("would change primary: agents/", output.getvalue())
+            self.assertFalse((home / "agents").exists())
+            self.assertFalse(
+                home.with_name(f"{home.name}.pilotfish-install-state.json").exists()
+            )
+
+    def test_roles_only_requires_explicit_approval_for_custom_same_name_role(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            agents = home / "agents"
+            agents.mkdir(parents=True)
+            role = agents / "executor.toml"
+            role.write_bytes(
+                (ROOT / "templates" / "agents" / "executor.toml").read_bytes()
+                + b"\n# user customization\n"
+            )
+            before = role.read_bytes()
+
+            with self.assertRaisesRegex(InstallAbort, "installed_role_drift"):
+                self.run_roles_only(home)
+            self.assertEqual(role.read_bytes(), before)
+            self.assertEqual(
+                self.run_roles_only(home, replace_drifted_role=("executor",)),
+                0,
+            )
+            self.assertEqual(
+                role.read_bytes(),
+                (ROOT / "templates" / "agents" / "executor.toml").read_bytes(),
+            )
+            backups = list(agents.glob("executor.toml.pilotfish-codex-*"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_bytes(), before)
 
     def _legacy_home(self, home: Path) -> Path:
         self.assertEqual(self.run_install(home), 0)

@@ -1,5 +1,5 @@
 <!-- pilotfish-codex:begin -->
-<!-- pilotfish-codex v1.8.0-rc.4 -->
+<!-- pilotfish-codex v1.8.0-rc.5 -->
 <!-- markdownlint-disable-next-line MD041 -->
 ### Pilotfish always-on bootstrap
 
@@ -18,6 +18,10 @@ Pilotfish supplements them and does not replace their precedence boundary.
   through its necessary commands, phases, and verification until acceptance.
   Phase updates do not require approval; explicit “only this step/slice” wording
   remains a named stop boundary.
+- For a clear bounded workstream or mandatory review, proactively dispatch the
+  least expensive matching native typed role. Keep one tightly coupled local
+  action in the parent; do not create a child for every command or wait for the
+  user to name the next phase.
 - Use `AUTO`/`ASK` only for explicit unattended continuation. Preserve material
   approval, security, release, destructive, external, and irreversible gates.
 - When the user explicitly starts the main session with Astra, use the

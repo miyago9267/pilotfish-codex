@@ -122,6 +122,21 @@ bash install/install.sh --follow-policy-symlink \
   --codex-home "$ACTIVE_CODEX_HOME"
 ```
 
+When the active home shares policy or hooks through symlinks managed outside
+that home, use the isolated native-role path:
+
+```bash
+bash install/install.sh --dry-run --roles-only \
+  --codex-home "$ACTIVE_CODEX_HOME"
+bash install/install.sh --roles-only \
+  --codex-home "$ACTIVE_CODEX_HOME"
+```
+
+This path changes only `agents/*.toml`; it does not integrate policy, modify
+`config.toml`, touch `hooks.json` or hook scripts, install a Plugin, or create
+installer state. It still preserves customized same-name roles and requires
+`--replace-drifted-role` or `--replace-drifted-roles` for an explicit change.
+
 ```powershell
 $activeCodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME ".codex" }
 .\install\install.ps1 --dry-run --codex-home $activeCodexHome

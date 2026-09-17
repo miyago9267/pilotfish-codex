@@ -43,6 +43,19 @@ class PolicyTests(unittest.TestCase):
         ):
             self.assertIn(phrase, policy)
 
+    def test_bootstrap_dispatches_bounded_roles_without_fragmenting_outcomes(self) -> None:
+        bootstrap = " ".join(
+            (ROOT / "templates" / "agents-md.bootstrap.md").read_text(encoding="utf-8").split()
+        )
+        for phrase in (
+            "clear bounded workstream or mandatory review",
+            "proactively dispatch",
+            "tightly coupled local action in the parent",
+            "do not create a child for every command",
+            "wait for the user to name the next phase",
+        ):
+            self.assertIn(phrase, bootstrap)
+
     def test_policy_keeps_mechanical_roles_on_the_luna_baseline(self) -> None:
         policy = " ".join(
             (ROOT / "templates" / "agents-md.orchestration.md").read_text(encoding="utf-8").split()

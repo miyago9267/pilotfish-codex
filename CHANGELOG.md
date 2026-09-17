@@ -7,6 +7,15 @@ are noted only as source references.
 
 ## Unreleased
 
+## v1.8.0-rc.5
+
+- Add an isolated `--roles-only` installer path for Codex homes whose policy or
+  hooks are co-managed through external symlinks; preserve config, hooks,
+  Plugin, state, and customized same-name roles unless explicitly approved.
+- Make bounded typed-role dispatch proactive while keeping tightly coupled local
+  work in the parent and preserving the existing Luna/Sol bindings and Astra
+  session boundary.
+
 ## v1.8.0-rc.4
 
 - Add the `pilotfish-decision-checkpoint-v1` contract with bounded options,

@@ -158,6 +158,21 @@ curl -fsSL \
     --codex-home "$PILOTFISH_TARGET_HOME"
 ```
 
+If the active home has a dotfiles-managed `AGENTS.md` or `hooks` symlink that
+points outside the home, use the isolated role path instead of integrating the
+full target:
+
+```bash
+bash install/install.sh --dry-run --roles-only \
+  --codex-home "$PILOTFISH_TARGET_HOME"
+bash install/install.sh --roles-only \
+  --codex-home "$PILOTFISH_TARGET_HOME"
+```
+
+`--roles-only` writes only the seven `agents/*.toml` files. It leaves policy,
+config, hooks, Plugin, and installer state untouched; existing same-name role
+customizations still require an explicit replacement option.
+
 `--ref=<release-tag-or-commit-sha>` is equivalent to the two-argument form.
 Keep the raw script URL ref and the archive ref identical. `PILOTFISH_REF` is
 only the wrapper fallback when `--ref` is omitted. The wrapper prints
@@ -201,10 +216,10 @@ curl -fsSL \
     --codex-home "$PILOTFISH_TARGET_HOME"
 ```
 
-The wrapper forwards only installer arguments such as `--dry-run` and
-`--codex-home`; it consumes `--help` and `--ref`. It validates a remote ref
-before constructing the codeload URL, uses no `eval` or `sudo`, and removes
-only its own temporary directory.
+The wrapper forwards only installer arguments such as `--dry-run`,
+`--roles-only`, and `--codex-home`; it consumes `--help` and `--ref`. It
+validates a remote ref before constructing the codeload URL, uses no `eval` or
+`sudo`, and removes only its own temporary directory.
 
 If the active policy path is a symlink managed by the user's dotfiles, the
 installer stops by default. After verifying the target, explicitly authorize

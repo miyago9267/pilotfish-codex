@@ -39,7 +39,13 @@ from hook_registration import (
     validate_source_registration,
     windows_compatibility_warnings,
 )
-from validate_agents import AGENTS_CONCURRENCY_KEY, ROLES, validate_agent, validate_agents_config
+from validate_agents import (
+    AGENTS_CONCURRENCY_KEY,
+    ROLES,
+    validate_agent,
+    validate_agents_config,
+    validate_dir,
+)
 
 IS_WINDOWS = sys.platform == "win32"
 MARKER_BEGIN = "<!-- pilotfish-codex:begin -->"
@@ -98,7 +104,7 @@ class PolicyTargetIdentity:
 
 MIN_COMPATIBLE_CODEX_VERSION = (0, 147, 0)
 PILOTFISH_PLUGIN_NAME = "pilotfish-codex"
-PILOTFISH_PLUGIN_VERSION = "1.8.0-rc.4"
+PILOTFISH_PLUGIN_VERSION = "1.8.0-rc.5"
 RUNTIME_STATUSES = frozenset({"integrated", "integrated-plugin-unavailable"})
 RECONCILIATION_STATE_VERSION = 4
 
@@ -1643,6 +1649,224 @@ def _commit(writes: list[tuple[Path, bytes, int, bytes | None]], stamp: str,
             temp.unlink(missing_ok=True)
 
 
+def _read_role_target(path: Path) -> bytes | None:
+    """Read one role target without accepting symlink or special-file paths."""
+    if path.is_symlink():
+        raise InstallAbort(f"role target must be a regular non-symlink file: {path}")
+    if not path.exists():
+        return None
+    if not path.is_file():
+        raise InstallAbort(f"role target must be a regular file: {path}")
+    return path.read_bytes()
+
+
+def _role_writes(
+    *,
+    source_root: Path,
+    codex_home: Path,
+    approved_drift_roles: set[str],
+) -> tuple[Path, list[tuple[Path, bytes, int, bytes | None]], list[str]]:
+    """Plan only role-manifest writes, independent of policy and hook state."""
+    source_agents = source_root / "templates" / "agents"
+    if source_agents.is_symlink() or not source_agents.is_dir():
+        raise InstallAbort("source role manifest is unavailable")
+    source_problems = validate_dir(source_agents, expected_names=ROLES)
+    if source_problems:
+        raise InstallAbort("source role manifest invalid: " + "; ".join(source_problems))
+
+    agents = codex_home / "agents"
+    _assert_agents_root(agents, codex_home)
+    writes: list[tuple[Path, bytes, int, bytes | None]] = []
+    notes: list[str] = []
+    for role in sorted(ROLES):
+        source = source_agents / f"{role}.toml"
+        payload = source.read_bytes()
+        target = agents / f"{role}.toml"
+        current = _read_role_target(target)
+        if current == payload:
+            continue
+        if current is not None:
+            digest = _sha256_bytes(current)
+            known = CANONICAL_ROLE_UPGRADE_DIGESTS.get(role, frozenset())
+            if digest not in known and role not in approved_drift_roles:
+                raise InstallAbort(
+                    f"installed_role_drift: agents/{role}.toml requires explicit replacement approval"
+                )
+            notes.append(
+                f"replaced drifted role {role} with upstream canonical bytes"
+                if digest not in known
+                else f"upgraded canonical role {role}"
+            )
+        else:
+            notes.append(f"installed missing role {role}")
+        writes.append((target, payload, 0o600, current))
+    return agents, writes, notes
+
+
+def _role_backup_path(target: Path, codex_home: Path, stamp: str) -> Path:
+    """Return a contained rollback path for one role target."""
+    try:
+        target.relative_to(codex_home)
+    except ValueError as exc:
+        raise InstallAbort("role rollback backup escapes Codex home") from exc
+    return target.with_name(f"{target.name}.pilotfish-codex-{stamp}")
+
+
+def _commit_role_writes(
+    writes: list[tuple[Path, bytes, int, bytes | None]],
+    *,
+    agents_root: Path,
+    codex_home: Path,
+    stamp: str,
+) -> list[tuple[Path, bytes | None, bytes, int]]:
+    """Atomically commit an isolated role update with per-file backups."""
+    if not writes:
+        return []
+    agents_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _assert_agents_root(agents_root, codex_home)
+    agents_fd: int | None = None
+    staged: list[tuple[Path, Path, bytes | None, bytes, int]] = []
+    try:
+        agents_fd = _open_agents_directory(agents_root)
+        for target, payload, mode, original in writes:
+            if target.parent != agents_root:
+                raise InstallAbort("role target escapes agents root")
+            if _read_role_target(target) != original:
+                raise InstallAbort(f"{target} changed while install was planned")
+            if original is not None:
+                backup = _role_backup_path(target, codex_home, stamp)
+                if backup.exists() or backup.is_symlink():
+                    raise InstallAbort(f"rollback backup already exists: {backup}")
+                _copy_backup_no_follow(target, backup, original)
+            fd, name = tempfile.mkstemp(
+                prefix=f".{target.name}.pilotfish-",
+                dir=codex_home,
+            )
+            temp = Path(name)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if not IS_WINDOWS:
+                os.chmod(temp, stat.S_IMODE(mode))
+            staged.append((target, temp, original, payload, mode))
+
+        for target, _, original, _, _ in staged:
+            if _read_role_target(target) != original:
+                raise InstallAbort(f"{target} changed while install was planned")
+
+        applied: list[tuple[Path, bytes | None, bytes, int]] = []
+        try:
+            for target, temp, original, payload, mode in staged:
+                if _read_role_target(target) != original:
+                    raise InstallAbort(f"{target} changed immediately before replacement")
+                if agents_fd is None:
+                    os.replace(temp, target)
+                else:
+                    os.replace(temp, target.name, dst_dir_fd=agents_fd)
+                applied.append((target, original, payload, mode))
+            expected_payloads = {target: payload for target, _, payload, _ in applied}
+            for target, payload in expected_payloads.items():
+                if _read_role_target(target) != payload:
+                    raise InstallAbort("post-write role fingerprint mismatch")
+            return applied
+        except (OSError, InstallAbort):
+            for target, original, payload, mode in reversed(applied):
+                try:
+                    current = _read_role_target(target)
+                except InstallAbort:
+                    continue
+                if current != payload:
+                    continue
+                if original is None:
+                    target.unlink(missing_ok=True)
+                else:
+                    _atomic_write(target, original, mode)
+            raise
+    finally:
+        if agents_fd is not None:
+            os.close(agents_fd)
+        for _, temp, _, _, _ in staged:
+            temp.unlink(missing_ok=True)
+
+
+def install_roles(
+    *,
+    source_root: Path,
+    codex_home: Path,
+    dry_run: bool,
+    check_codex: bool = True,
+    replace_drifted_roles: bool = False,
+    replace_drifted_role: tuple[str, ...] = (),
+) -> int:
+    """Install only native roles when other Codex home paths are co-managed."""
+    unknown_drift_roles = set(replace_drifted_role) - set(ROLES)
+    if unknown_drift_roles:
+        raise InstallAbort(
+            "unknown drifted role: " + ", ".join(sorted(unknown_drift_roles))
+        )
+    approved_drift_roles = (
+        set(ROLES) if replace_drifted_roles else set(replace_drifted_role)
+    )
+    if check_codex:
+        try:
+            completed = subprocess.run(
+                [_codex_cli(), "--version"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError:
+            completed = None
+        version = parse_codex_version(
+            (completed.stdout + completed.stderr)
+            if completed and completed.returncode == 0
+            else ""
+        )
+        if version is None:
+            print("error: version_parse_failed", file=sys.stderr)
+            return 2
+        if version < MIN_COMPATIBLE_CODEX_VERSION:
+            minimum = ".".join(str(part) for part in MIN_COMPATIBLE_CODEX_VERSION)
+            print(
+                f"error: version_below_minimum (requires >= {minimum})",
+                file=sys.stderr,
+            )
+            return 2
+
+    agents, writes, notes = _role_writes(
+        source_root=source_root,
+        codex_home=codex_home,
+        approved_drift_roles=approved_drift_roles,
+    )
+    if dry_run:
+        for note in notes:
+            print(f"note: {note}")
+        if not writes:
+            print("already up to date; nothing to change")
+            return 0
+        for target, _, _, original in writes:
+            print(f"would change primary: {target.relative_to(codex_home).as_posix()}")
+            if original is not None:
+                backup = _role_backup_path(target, codex_home, "<timestamp>")
+                print(
+                    "allowed transaction artifact: "
+                    f"{backup.relative_to(codex_home).as_posix()}"
+                )
+        return 0
+
+    _commit_role_writes(
+        writes,
+        agents_root=agents,
+        codex_home=codex_home,
+        stamp=_stamp(),
+    )
+    for note in notes:
+        print(f"note: {note}")
+    print("changed native role manifest" if writes else "already up to date; nothing to change")
+    return 0
+
+
 def install(
     *,
     source_root: Path,
@@ -2273,6 +2497,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--codex-home", type=Path, default=Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")))
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
+        "--roles-only",
+        action="store_true",
+        help="install only native role TOMLs; leave policy, config, hooks, Plugin, and state untouched",
+    )
+    parser.add_argument(
         "--replace-drifted-roles",
         action="store_true",
         help="explicitly replace all customized same-name roles with upstream templates",
@@ -2306,6 +2535,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     try:
+        if args.roles_only and (
+            args.follow_policy_symlink
+            or args.policy_root is not None
+            or args.reconcile_current
+            or args.allow_plugin_downgrade
+        ):
+            raise InstallAbort(
+                "--roles-only cannot be combined with policy, reconciliation, or Plugin options"
+            )
+        if args.roles_only:
+            return install_roles(
+                source_root=Path(__file__).resolve().parents[1],
+                codex_home=args.codex_home,
+                dry_run=args.dry_run,
+                replace_drifted_roles=args.replace_drifted_roles,
+                replace_drifted_role=tuple(args.replace_drifted_role),
+            )
         return install(
             source_root=Path(__file__).resolve().parents[1],
             codex_home=args.codex_home,

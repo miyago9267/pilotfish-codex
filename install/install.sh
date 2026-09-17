@@ -29,7 +29,7 @@ Wrapper options:
                      is available. The same value may be written --ref=REF.
 
 Installer options are forwarded unchanged to install.py. Supported options
-include --dry-run, --codex-home, --follow-policy-symlink,
+include --dry-run, --roles-only, --codex-home, --follow-policy-symlink,
 --policy-root, --reconcile-current, --allow-plugin-downgrade,
 --replace-drifted-role, and --replace-drifted-roles.
 
