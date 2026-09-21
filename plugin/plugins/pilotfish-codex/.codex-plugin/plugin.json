@@ -1,6 +1,6 @@
 {
   "name": "pilotfish-codex",
-  "version": "1.8.0-rc.7",
+  "version": "1.8.0-rc.8",
   "description": "Hybrid Pilotfish orchestration with an always-on policy bootstrap and detailed workflow Skill.",
   "author": {
     "name": "Miyago"

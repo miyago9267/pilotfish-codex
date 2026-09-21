@@ -1,6 +1,6 @@
 ---
 id: spec-automatic-model-routing
-title: Automatic model routing for atomic and judgment work
+title: Automatic model routing for atomic, guarded, and deep judgment work
 status: implemented
 created: 2026-09-21
 updated: 2026-09-21
@@ -10,27 +10,30 @@ priority: high
 ---
 
 <!-- markdownlint-disable-next-line MD025 -->
-# Automatic model routing for atomic and judgment work
+# Automatic model routing for atomic, guarded, and deep judgment work
 
 ## Goal
 
-讓 workflow 依工作需要的判斷成本自動選 model。固定的一個指令一個動作走
-cheap Luna；需要設計、選工具、解讀輸出、多步驟整合或 QA 的工作自動升級到
-strong typed role。Miyago 不需要在 prompt 中要求「開多 role」。
+讓 workflow 依工作需要的判斷成本自動選 model。固定的一個指令一個動作、一般
+設計、普通工具、機械式多步驟與尚未證明複雜的工作走 cheap Luna；只有高信心的
+深層架構、跨系統權衡、衝突證據、進階工具編排或 cheap path 失敗，才自動升級
+到 strong typed role。Miyago 不需要在 prompt 中要求「開多 role」。
 
 ## Scope
 
 - 在 `UserPromptSubmit` 由 hook 判定啟動時機與實現目的，產生保守、redacted
-  的 atomic/judgment route signal。
+  的 atomic/guarded/judgment route signal。
 - route signal 明確帶出 escalation 條件與 dispatch contract，讓 parent 不必
   猜測是否要開 role、使用哪個 task 或 fork 邊界。
-- 對非 atomic turn 自動要求 `executor` typed role；該 role 綁定
+- 只有 deep judgment turn 自動要求 `executor` typed role；該 role 綁定
   `gpt-6-astra@high`。
 - 對 atomic turn 保持 parent-local cheap execution，不建立 child。
+- 對 guarded turn 保持 parent-local cheap execution，先要求 bounded probe，
+  不因不確定本身建立 Astra child。
 - 若 judgment turn 結束時沒有對應的 typed `executor` child，透過既有 Stop
   hook 最多自動重試一次。
-- 不確定時一律往 strong route 升級；工具輸出異常或 scope 擴大時沿用同一
-  個升級規則。
+- 不確定時先走 guarded cheap route；工具輸出異常、scope 擴大或出現 deep
+  complexity evidence 時，沿用同一個一次性升級規則。
 - 保留 security、permission、external、release、destructive 與
   irreversible 的既有 gates。
 
@@ -50,12 +53,17 @@ strong typed role。Miyago 不需要在 prompt 中要求「開多 role」。
 stop condition 都可直接判斷時成立。parent 使用目前 cheap binding，或把完整
 mechanical brief 交給 `mech-executor`。
 
+### `guarded`
+
+一般設計、普通工具操作、機械式多步驟、需求含糊或 atomic 判定不確定時成立。
+parent 使用 cheap Luna 做 bounded probe，不因單一關鍵字或不確定本身建立
+child；只有 probe 產生 deep complexity evidence 才升級。
+
 ### `judgment`
 
-以下任一條件成立即自動升級：需要設計或拆解、需要選擇或解讀工具輸出、跨檔案
-或跨系統、多步驟、需求含糊、需要修正方向，或 atomic 判定不確定。預設 route
-是 `executor`，由 `gpt-6-astra@high` 負責 bounded implementation、工具操作與
-局部設計判斷；parent 保留 scope、整合與最終 acceptance。
+高信心的深層架構、跨系統權衡、衝突證據、進階工具編排或明確的 deep reasoning
+需求成立。route 是 `executor`，由 `gpt-6-astra@high` 負責 bounded implementation
+與局部設計判斷；parent 保留 scope、整合與最終 acceptance。
 
 ### Anti-tunnel escalation
 
@@ -67,8 +75,10 @@ cheap action 的工作包固定為 `goal -> target -> exact action -> expected s
 ## Acceptance
 
 - 明確的單一 command 產生 `atomic` signal，且不要求 child。
-- 設計、工具選擇、模糊需求與多步驟 prompt 產生 `judgment` signal，且要求
-  `executor`。
+- 一般設計、普通工具、模糊需求與多步驟 prompt 產生 `guarded` signal，保持
+  cheap parent-local execution。
+- 高信心 deep architecture、跨系統權衡、衝突證據或進階工具編排才產生
+  `judgment` signal，且要求 `executor`。
 - judgment turn 沒有 typed `executor` 時，Stop hook 只重試一次並給出固定 route
   directive；directive 固定 `agent_type=executor`、`task_name=automatic_model_route`
   與 `fork_turns=none`。Codex 已由 Stop hook 續行後，不得再次鎖住同一 session。

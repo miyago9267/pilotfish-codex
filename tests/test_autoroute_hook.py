@@ -157,13 +157,37 @@ class AutorouteHookTests(unittest.TestCase):
             self.assertIn('"escalate_on":["unexpected_result","error","retry","target_change","unlisted_next_action"]', context)
             self.assertEqual(list((home / gate.MARKER_DIRECTORY).glob("*.json")), [])
 
+    def test_routine_judgment_and_uncertainty_stay_on_cheap_guarded_route(self) -> None:
+        prompts = (
+            "Astra可以少量出現，但不能隨便就冒出來啊不然會貴死",
+            "請設計這個 parser 的修復流程。",
+            "請用工具檢查這個本地設定。",
+        )
+        for prompt in prompts:
+            with self.subTest(prompt=prompt), tempfile.TemporaryDirectory() as directory:
+                home = Path(directory) / "codex-home"
+                home.mkdir()
+
+                payload = gate.handle(prompt_input(prompt), codex_home=home)
+
+                self.assertIsInstance(payload, dict)
+                context = payload["hookSpecificOutput"]["additionalContext"]
+                self.assertIn('"route":"guarded"', context)
+                self.assertIn('"model_policy":"cheap"', context)
+                self.assertIn('"purpose":"cheap_guarded_probe"', context)
+                self.assertIn('"required_role":"none"', context)
+                self.assertNotIn("gpt-6-astra@high", context)
+                self.assertEqual(list((home / gate.MARKER_DIRECTORY).glob("*.json")), [])
+
     def test_judgment_route_automatically_requires_strong_executor(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "codex-home"
             home.mkdir()
 
             payload = gate.handle(
-                prompt_input("幫我設計並實作這個 parser 的修復流程。"),
+                prompt_input(
+                    "請重新設計跨系統架構，評估兩種資料遷移方案的權衡，並處理衝突證據。"
+                ),
                 codex_home=home,
             )
 
@@ -190,7 +214,9 @@ class AutorouteHookTests(unittest.TestCase):
             home.mkdir()
             transcript = home / "sessions" / "rollout.jsonl"
             gate.handle(
-                prompt_input("請診斷這個跨檔案 bug，並用工具驗證修復。"),
+                prompt_input(
+                    "請重新設計跨系統架構，評估兩種資料遷移方案的權衡，並處理衝突證據。"
+                ),
                 codex_home=home,
             )
             write_events(transcript, [session_meta(), task_started()])
@@ -211,7 +237,9 @@ class AutorouteHookTests(unittest.TestCase):
             home.mkdir()
             transcript = home / "sessions" / "rollout.jsonl"
             gate.handle(
-                prompt_input("請診斷這個跨檔案 bug，並用工具驗證修復。"),
+                prompt_input(
+                    "請重新設計跨系統架構，評估兩種資料遷移方案的權衡，並處理衝突證據。"
+                ),
                 codex_home=home,
             )
             write_events(transcript, [session_meta(), task_started()])
@@ -257,7 +285,7 @@ class AutorouteHookTests(unittest.TestCase):
             home.mkdir()
             transcript = home / "sessions" / "rollout.jsonl"
             gate.handle(
-                prompt_input("請規劃並完成這個跨模組修復。"),
+                prompt_input("請重新設計跨服務架構並處理衝突證據。"),
                 codex_home=home,
             )
             write_events(

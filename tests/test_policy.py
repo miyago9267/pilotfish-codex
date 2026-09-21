@@ -49,8 +49,9 @@ class PolicyTests(unittest.TestCase):
         )
         for phrase in (
             "Atomic one-command/one-action work",
-            "Design, tool choice, interpretation, multi-step, or verification work",
-            "`executor`/`verifier` at Astra `high`, automatically",
+            "Routine design, ordinary tools, bounded multi-step, or uncertainty",
+            "`executor`/`verifier` at Astra `high`, selectively",
+            "only for deep architecture",
             "Automatic typed escalation never switches the root model",
             "main session should not wait for the user to name a subagent",
         ):
@@ -61,8 +62,8 @@ class PolicyTests(unittest.TestCase):
             (ROOT / "templates" / "agents-md.bootstrap.md").read_text(encoding="utf-8").split()
         )
         for phrase in (
-            "Route by capability before the first action",
-            "automatically use `executor` for design",
+            "Route by capability: atomic, routine, and uncertain work stays on cheap Luna",
+            "reserve `executor` for deep architecture",
             "proactively dispatch the least expensive matching native typed role",
         ):
             self.assertIn(phrase, bootstrap)

@@ -16,11 +16,12 @@ owner: Miyago
 需要設計、工具、解讀、多步驟或不確定性時自動開 strong typed role，並保留防止
 tunnel vision 的固定工作包與一次性升級邊界。
 
-## Current release candidate — v1.8.0-rc.7
+## Current release candidate — v1.8.0-rc.8
 
 - [x] Automatic model routing spec and route-marker implementation are implemented.
-- [x] `UserPromptSubmit` now emits a redacted `atomic`/`judgment` route signal
-  with trigger, purpose, escalation conditions, and typed dispatch fields.
+- [x] `UserPromptSubmit` now emits a redacted `atomic`/`guarded`/`judgment`
+  route signal with trigger, purpose, escalation conditions, and typed dispatch
+  fields; Astra is reserved for high-confidence deep judgment.
 - [x] Stop hook retries a missing typed `executor` route once, pins
   `fork_turns=none`, and does not re-lock an already continued turn.
 - [x] `executor` and `verifier` templates now bind to `gpt-6-astra@high`;
@@ -28,7 +29,7 @@ tunnel vision 的固定工作包與一次性升級邊界。
 - [x] Prompt-lock and full test pass; effective Orca home roles and full
   `~/.codex` installer dry-run are verified.
 - [x] Full global hook/Plugin install is complete; the installer state is
-  committed as v4 with Plugin `1.8.0-rc.7`.
+  committed as v4 with Plugin `1.8.0-rc.8`.
 - [ ] Live automatic task-class selection remains unverified; static route and
   typed-dispatch evidence cannot prove every natural-language turn.
 

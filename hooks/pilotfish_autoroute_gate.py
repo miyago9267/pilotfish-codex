@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Route atomic work cheaply and retry one missing strong-role escalation."""
+"""Route cheap work conservatively and reserve strong escalation for deep judgment."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from typing import Any
 
 SCHEMA = 2
 REQUIRED_TASK = "automatic_plan_review"
-ROUTE_SCHEMA = 2
+ROUTE_SCHEMA = 3
 ROUTE_REQUIRED_TASK = "automatic_model_route"
 ROUTE_ESCALATION_EVENTS = (
     "unexpected_result",
@@ -175,6 +175,18 @@ _ATOMIC_CONNECTOR = re.compile(
     r"同時|同时|接著|接着",
     re.IGNORECASE,
 )
+_DEEP_JUDGMENT_HINTS = re.compile(
+    r"\b(?:architecture|architectural|redesign|cross[- ]system|cross[- ]service|"
+    r"multi[- ]system|trade[- ]off|tradeoff|conflicting evidence|root cause analysis|"
+    r"migration strategy|migration plan|advanced tool|specialized tool|"
+    r"tool orchestration|toolchain|deep reasoning|complex reasoning|deep analysis)\b|"
+    r"架構|架构|重新設計|重新设计|跨系統|跨系统|跨服務|跨服务|多系統|多系统|"
+    r"權衡|权衡|取捨|取舍|衝突證據|冲突证据|根因分析|遷移策略|迁移策略|"
+    r"高級工具|高级工具|高階工具|高阶工具|進階工具|进阶工具|工具編排|工具编排|"
+    r"工具鏈|工具链|深度推理|深入推理|深度分析|深入分析|通靈|"
+    r"ROUTE_ESCALATION_REQUIRED|automatic_model_route",
+    re.IGNORECASE,
+)
 _JUDGMENT_HINTS = re.compile(
     r"設計|设计|規劃|规划|實作|实现|修復|修复|診斷|诊断|分析|比較|比较|"
     r"選擇|选择|解讀|解读|原因|為什麼|为什么|how|why|design|plan|diagnos|"
@@ -223,9 +235,9 @@ def classify_review_intent(prompt: object) -> str | None:
 
 
 def classify_execution_route(prompt: object) -> str:
-    """Choose a conservative cheap-vs-strong route without retaining prompt text."""
+    """Choose atomic, guarded-cheap, or deep-judgment without retaining prompt text."""
     if not isinstance(prompt, str) or len(prompt) > MAX_PROMPT_CHARS:
-        return "judgment"
+        return "guarded"
     text = prompt.strip()
     if (
         (_ATOMIC_COMMAND.fullmatch(text) or _ATOMIC_DIRECT_ACTION.fullmatch(text))
@@ -234,22 +246,26 @@ def classify_execution_route(prompt: object) -> str:
         and _JUDGMENT_HINTS.search(text) is None
     ):
         return "atomic"
-    return "judgment"
+    if _DEEP_JUDGMENT_HINTS.search(text) is not None:
+        return "judgment"
+    return "guarded"
 
 
 def execution_route_reason(prompt: object, route: str) -> str:
     """Return a stable redacted reason for the selected route."""
     if route == "atomic":
         return "single_action"
+    if route == "judgment":
+        return "deep_judgment"
     if not isinstance(prompt, str):
-        return "uncertain"
-    if _JUDGMENT_HINTS.search(prompt) is not None:
-        return "design_or_interpretation"
+        return "uncertain_but_bounded"
     if _ATOMIC_CONNECTOR.search(prompt) is not None:
         return "multiple_steps"
     if _ATOMIC_UNSAFE.search(prompt) is not None:
         return "authority_or_irreversible_boundary"
-    return "uncertain"
+    if _JUDGMENT_HINTS.search(prompt) is not None:
+        return "routine_judgment"
+    return "uncertain_but_bounded"
 
 
 def _route_signal(payload: dict[str, Any], prompt: object) -> dict[str, Any]:
@@ -263,11 +279,13 @@ def _route_signal(payload: dict[str, Any], prompt: object) -> dict[str, Any]:
         purpose = "pre_approval_security_review"
         dispatch = {"mode": "existing_review_gate"}
         escalate_on: list[str] = []
-    elif route == "atomic":
+    elif route in {"atomic", "guarded"}:
         required_role = "none"
         model_policy = "cheap"
         model_snapshot = "gpt-5.6-luna@medium"
-        purpose = "local_atomic_action"
+        purpose = (
+            "local_atomic_action" if route == "atomic" else "cheap_guarded_probe"
+        )
         dispatch = {"mode": "parent_local"}
         escalate_on = list(ROUTE_ESCALATION_EVENTS)
     else:

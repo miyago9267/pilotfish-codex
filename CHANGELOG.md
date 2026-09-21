@@ -7,6 +7,13 @@ are noted only as source references.
 
 ## Unreleased
 
+## v1.8.0-rc.8
+
+- Reserve Astra automatic escalation for high-confidence deep architecture,
+  cross-system trade-offs, conflicting evidence, and advanced tool orchestration.
+- Keep routine design, ordinary tools, and uncertain prompts on a cheap guarded
+  Luna path until evidence justifies one bounded escalation.
+
 ## v1.8.0-rc.7
 
 - Make the automatic route signal declare its trigger, purpose, escalation
