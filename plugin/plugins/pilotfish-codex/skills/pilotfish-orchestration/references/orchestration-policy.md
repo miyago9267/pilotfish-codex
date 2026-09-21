@@ -1,5 +1,5 @@
 <!-- pilotfish-codex:begin -->
-<!-- pilotfish-codex v1.8.0-rc.5 -->
+<!-- pilotfish-codex v1.8.0-rc.6 -->
 <!-- markdownlint-disable-next-line MD041 -->
 ### Orchestration
 
@@ -32,10 +32,10 @@ projection never bypasses typed dispatch or host approval.
 
 | Work surface | Default candidate | Conditional Astra candidate |
 |---|---|---|
-| Local, structured, or routine work | The role's current Luna binding | Never escalate for difficulty alone |
+| Atomic one-command/one-action work | Parent or `mech-executor` Luna binding | Never open a child |
 | Pure Plan or semantic judgment | Sol where the existing contract requires it | Do not replace `plan-verifier` |
 | Security review with cross-file or cross-system evidence | Current reviewer binding | `security-reviewer` at Astra `high`, read-only |
-| Verification or execution spanning systems, browser, MCP, terminal, deployment evidence, or a long acceptance flow | Current role binding | `verifier` or `executor` at Astra `high` when the trigger is explicit |
+| Design, tool choice, interpretation, multi-step, or verification work | Current role binding | `executor`/`verifier` at Astra `high`, automatically |
 | Fingerprinted disagreement between two verdicts | Existing adjudication path | One Astra `high` adjudication, then stop |
 
 #### Explicit Astra main-session mode
@@ -58,12 +58,12 @@ sufficient pass, minimal research, and a stop at acceptance evidence. Treat
 provider-enforced quota. The one-child cap is the only native concurrency
 guard in this mode.
 
-Use Astra for synthesis, planning, and difficult judgment. Delegate routine,
-mechanical, repetitive, and bounded execution to the existing Luna roles.
-`mech-executor` and `scout` remain baseline-only, and `plan-verifier` remains
-`gpt-5.6-sol@high`; required approval, security, release, and fresh-verifier
-gates remain unchanged. Do not create an Astra child or switch the main model
-automatically because a task is difficult.
+Use installed `executor`/`verifier` Astra bindings for design, tools,
+interpretation, and multi-step judgment; keep atomic/mechanical work on Luna
+roles. `mech-executor` and `scout` remain baseline-only, and `plan-verifier`
+remains `gpt-5.6-sol@high`; required approval, security, release, and
+fresh-verifier gates remain unchanged. Automatic typed escalation never
+switches the root model in place because a task is difficult.
 
 If Astra is unavailable or an override is invalid, fail closed before task
 work or an Astra dispatch receipt. Recovery requires a separately started

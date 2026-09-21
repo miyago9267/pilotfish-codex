@@ -43,6 +43,30 @@ class PolicyTests(unittest.TestCase):
         ):
             self.assertIn(phrase, policy)
 
+    def test_policy_automatically_escalates_judgment_work_without_user_dispatch(self) -> None:
+        policy = " ".join(
+            (ROOT / "templates" / "agents-md.orchestration.md").read_text(encoding="utf-8").split()
+        )
+        for phrase in (
+            "Atomic one-command/one-action work",
+            "Design, tool choice, interpretation, multi-step, or verification work",
+            "`executor`/`verifier` at Astra `high`, automatically",
+            "Automatic typed escalation never switches the root model",
+            "main session should not wait for the user to name a subagent",
+        ):
+            self.assertIn(phrase, policy)
+
+    def test_bootstrap_automatic_route_does_not_wait_for_role_request(self) -> None:
+        bootstrap = " ".join(
+            (ROOT / "templates" / "agents-md.bootstrap.md").read_text(encoding="utf-8").split()
+        )
+        for phrase in (
+            "Route by capability before the first action",
+            "automatically use `executor` for design",
+            "proactively dispatch the least expensive matching native typed role",
+        ):
+            self.assertIn(phrase, bootstrap)
+
     def test_bootstrap_dispatches_bounded_roles_without_fragmenting_outcomes(self) -> None:
         bootstrap = " ".join(
             (ROOT / "templates" / "agents-md.bootstrap.md").read_text(encoding="utf-8").split()

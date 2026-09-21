@@ -1,5 +1,5 @@
 {
-  "description": "Pilotfish automatic typed Plan-review gate.",
+  "description": "Pilotfish automatic typed Plan-review gate. Automatic model-route signals are also emitted.",
   "hooks": {
     "UserPromptSubmit": [
       {

@@ -136,6 +136,109 @@ def child_events(
 
 
 class AutorouteHookTests(unittest.TestCase):
+    def test_atomic_route_stays_local_and_cheap(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "codex-home"
+            home.mkdir()
+
+            payload = gate.handle(
+                prompt_input("請執行 `git status`。"),
+                codex_home=home,
+            )
+
+            self.assertIsInstance(payload, dict)
+            context = payload["hookSpecificOutput"]["additionalContext"]
+            self.assertIn('"route":"atomic"', context)
+            self.assertIn('"model_policy":"cheap"', context)
+            self.assertIn('"required_role":"none"', context)
+            self.assertEqual(list((home / gate.MARKER_DIRECTORY).glob("*.json")), [])
+
+    def test_judgment_route_automatically_requires_strong_executor(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "codex-home"
+            home.mkdir()
+
+            payload = gate.handle(
+                prompt_input("幫我設計並實作這個 parser 的修復流程。"),
+                codex_home=home,
+            )
+
+            self.assertIsInstance(payload, dict)
+            context = payload["hookSpecificOutput"]["additionalContext"]
+            self.assertIn('"route":"judgment"', context)
+            self.assertIn('"model_policy":"strong"', context)
+            self.assertIn('"required_role":"executor"', context)
+            self.assertIn("gpt-6-astra@high", context)
+            marker = gate._route_marker_path(home, SESSION, create=False)
+            self.assertIsNotNone(marker)
+            self.assertEqual(json.loads(marker.read_text())["required_role"], "executor")
+
+    def test_judgment_route_retries_once_when_executor_was_not_opened(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "codex-home"
+            home.mkdir()
+            transcript = home / "sessions" / "rollout.jsonl"
+            gate.handle(
+                prompt_input("請診斷這個跨檔案 bug，並用工具驗證修復。"),
+                codex_home=home,
+            )
+            write_events(transcript, [session_meta(), task_started()])
+
+            self.assertEqual(
+                gate.handle(stop_input(transcript), codex_home=home),
+                gate.MODEL_ROUTE_OUTPUT,
+            )
+            marker = gate._route_marker_path(home, SESSION, create=False)
+            self.assertTrue(json.loads(marker.read_text())["attempted"])
+            self.assertIsNone(gate.handle(stop_input(transcript), codex_home=home))
+
+    def test_judgment_route_clears_after_matching_executor_spawn(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "codex-home"
+            home.mkdir()
+            transcript = home / "sessions" / "rollout.jsonl"
+            gate.handle(
+                prompt_input("請規劃並完成這個跨模組修復。"),
+                codex_home=home,
+            )
+            write_events(
+                transcript,
+                [
+                    session_meta(),
+                    task_started(),
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call",
+                            "name": "spawn_agent",
+                            "call_id": "executor-call",
+                            "arguments": json.dumps(
+                                {
+                                    "message": "Own the bounded implementation.",
+                                    "agent_type": "executor",
+                                    "task_name": "automatic_model_route",
+                                    "fork_turns": "none",
+                                }
+                            ),
+                        },
+                    },
+                    {
+                        "type": "event_msg",
+                        "payload": {
+                            "type": "sub_agent_activity",
+                            "kind": "started",
+                            "event_id": "executor-call",
+                            "agent_thread_id": "executor-child",
+                        },
+                    },
+                ],
+            )
+
+            self.assertIsNone(gate.handle(stop_input(transcript), codex_home=home))
+            route_marker = gate._route_marker_path(home, SESSION, create=False)
+            self.assertIsNotNone(route_marker)
+            self.assertFalse(route_marker.exists())
+
     def test_missing_review_block_explains_wait_state_and_write_boundary(self) -> None:
         self.assertIn("Status: WAITING_FOR_REVIEW", gate.BLOCK_REASON)
         self.assertIn("not a user decision", gate.BLOCK_REASON)
@@ -162,12 +265,16 @@ class AutorouteHookTests(unittest.TestCase):
                 prompt_input("請修正下一回合的拼字。", turn_id="next-turn"),
                 codex_home=home,
             )
-            self.assertIsNone(
-                gate.handle(
-                    prompt_input("請修正下一回合的拼字。", turn_id="next-turn"),
-                    codex_home=home,
-                )
+            next_payload = gate.handle(
+                prompt_input("請修正下一回合的拼字。", turn_id="next-turn"),
+                codex_home=home,
             )
+            self.assertIsInstance(next_payload, dict)
+            self.assertIn(
+                '"route":"atomic"',
+                next_payload["hookSpecificOutput"]["additionalContext"],
+            )
+            self.assertNotIn("review_intent", next_payload["hookSpecificOutput"]["additionalContext"])
 
     def test_ambiguous_or_quoted_review_intent_falls_back_to_default(self) -> None:
         prompts = (
@@ -197,7 +304,12 @@ class AutorouteHookTests(unittest.TestCase):
             home = Path(directory) / "codex-home"
             home.mkdir()
 
-            self.assertIsNone(gate.handle(prompt_input(TRIGGER), codex_home=home))
+            payload = gate.handle(prompt_input(TRIGGER), codex_home=home)
+            self.assertIsInstance(payload, dict)
+            self.assertIn(
+                '"required_role":"security-reviewer"',
+                payload["hookSpecificOutput"]["additionalContext"],
+            )
 
             marker_dir = home / gate.MARKER_DIRECTORY
             markers = list(marker_dir.glob("*.json"))

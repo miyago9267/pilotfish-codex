@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Enforce one redacted retry for risk-triggered pre-approval Plan review."""
+"""Route atomic work cheaply and retry one missing strong-role escalation."""
 
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ from typing import Any
 
 SCHEMA = 2
 REQUIRED_TASK = "automatic_plan_review"
+ROUTE_SCHEMA = 1
+ROUTE_REQUIRED_TASK = "automatic_model_route"
 MARKER_DIRECTORY = ".pilotfish-autoroute-gate"
 MAX_HOOK_INPUT_BYTES = 1_048_576
 MAX_PROMPT_CHARS = 65_536
@@ -42,6 +44,16 @@ BLOCK_REASON = (
     "or ask the user solely because this review is pending."
 )
 BLOCK_OUTPUT = {"decision": "block", "reason": BLOCK_REASON}
+MODEL_ROUTE_OUTPUT = {
+    "decision": "block",
+    "reason": (
+        "Status: ROUTE_ESCALATION_REQUIRED. This turn needs design, tool use, "
+        "interpretation, or multiple steps. Automatically call the typed "
+        "`executor` role now; it is the strong `gpt-6-astra@high` binding. "
+        "Do not ask the user to request a role or choose the next phase. "
+        "Keep the existing goal, target, acceptance, and stop condition."
+    ),
+}
 
 _PLAN_RE = re.compile(
     r"(?:\b(?:plan|planning|pre-approval|approval|approve|readiness|proposal)\b|"
@@ -88,6 +100,18 @@ _MARKER_KEYS = frozenset(
         "blocker_fingerprint",
     }
 )
+_ROUTE_MARKER_KEYS = frozenset(
+    {
+        "schema",
+        "session_id",
+        "turn_id",
+        "required_task",
+        "required_role",
+        "route",
+        "attempted",
+        "route_fingerprint",
+    }
+)
 _REVIEW_INTENT_PATTERNS = {
     "fast": re.compile(
         r"(?:快一點|快點|省時間|省錢|節省(?:時間|成本|token)|"
@@ -114,6 +138,37 @@ _REVIEW_INTENT_NEGATION = re.compile(
 )
 _QUOTED_SEGMENT = re.compile(
     r'"[^"\n]*"|\'[^\'\n]*\'|`[^`\n]*`|「[^」\n]*」|『[^』\n]*』'
+)
+_ATOMIC_COMMAND = re.compile(
+    r"^\s*(?:請|请|please\s+)?(?:執行|执行|run|execute|check|檢查|检查|"
+    r"查看|顯示|显示|列出|show|list)\s+(?:`[^`\n]+`|"
+    r"[A-Za-z0-9_./:@+=,-]+(?:\s+[A-Za-z0-9_./:@+=,-]+)*)"
+    r"[。.!！?？]*\s*$",
+    re.IGNORECASE,
+)
+_ATOMIC_DIRECT_ACTION = re.compile(
+    r"^\s*(?:請|请|please\s+)?(?:修正|修复|修復|fix|改正)\s*"
+    r"[^。.!！?？]*(?:拼字|拼寫|拼写|typo|spelling|格式化|format|"
+    r"formatting|格式)[^。.!！?？]*"
+    r"[^。.!！?？]*[。.!！?？]*\s*$",
+    re.IGNORECASE,
+)
+_ATOMIC_UNSAFE = re.compile(
+    r"\b(?:rm|delete|drop|truncate|purge|force[- ]?push|deploy|production|"
+    r"sudo|chmod|credential|secret|token|password)\b|刪除|删除|清除|覆寫|"
+    r"覆写|部署|正式環境|正式环境|憑證|凭证|密碼|密码|祕密|秘密",
+    re.IGNORECASE,
+)
+_ATOMIC_CONNECTOR = re.compile(
+    r"\b(?:and|then|after|also|multiple|both)\b|然後|然后|再|以及|並且|并且|"
+    r"同時|同时|接著|接着",
+    re.IGNORECASE,
+)
+_JUDGMENT_HINTS = re.compile(
+    r"設計|设计|規劃|规划|實作|实现|修復|修复|診斷|诊断|分析|比較|比较|"
+    r"選擇|选择|解讀|解读|原因|為什麼|为什么|how|why|design|plan|diagnos|"
+    r"debug|architect|tool|工具|流程|方案|策略|多步|跨檔|跨文件|跨系統|跨系统",
+    re.IGNORECASE,
 )
 
 
@@ -154,6 +209,64 @@ def classify_review_intent(prompt: object) -> str | None:
         if pattern.search(text) is not None
     ]
     return matches[0] if len(matches) == 1 else None
+
+
+def classify_execution_route(prompt: object) -> str:
+    """Choose a conservative cheap-vs-strong route without retaining prompt text."""
+    if not isinstance(prompt, str) or len(prompt) > MAX_PROMPT_CHARS:
+        return "judgment"
+    text = prompt.strip()
+    if (
+        (_ATOMIC_COMMAND.fullmatch(text) or _ATOMIC_DIRECT_ACTION.fullmatch(text))
+        and _ATOMIC_UNSAFE.search(text) is None
+        and _ATOMIC_CONNECTOR.search(text) is None
+        and _JUDGMENT_HINTS.search(text) is None
+    ):
+        return "atomic"
+    return "judgment"
+
+
+def execution_route_reason(prompt: object, route: str) -> str:
+    """Return a stable redacted reason for the selected route."""
+    if route == "atomic":
+        return "single_action"
+    if not isinstance(prompt, str):
+        return "uncertain"
+    if _JUDGMENT_HINTS.search(prompt) is not None:
+        return "design_or_interpretation"
+    if _ATOMIC_CONNECTOR.search(prompt) is not None:
+        return "multiple_steps"
+    if _ATOMIC_UNSAFE.search(prompt) is not None:
+        return "authority_or_irreversible_boundary"
+    return "uncertain"
+
+
+def _route_signal(payload: dict[str, Any], prompt: object) -> dict[str, Any]:
+    route = classify_execution_route(prompt)
+    categories = classify_prompt(prompt)
+    security_route = route == "judgment" and "security" in categories
+    if security_route:
+        required_role = "security-reviewer"
+        model_policy = "specialized"
+        model_snapshot = "gpt-5.6-sol@high"
+    elif route == "atomic":
+        required_role = "none"
+        model_policy = "cheap"
+        model_snapshot = "gpt-5.6-luna@medium"
+    else:
+        required_role = "executor"
+        model_policy = "strong"
+        model_snapshot = "gpt-6-astra@high"
+    return {
+        "schema": ROUTE_SCHEMA,
+        "session_id": payload["session_id"],
+        "turn_id": payload["turn_id"],
+        "route": route,
+        "model_policy": model_policy,
+        "required_role": required_role,
+        "model_snapshot": model_snapshot,
+        "reason": execution_route_reason(prompt, route),
+    }
 
 
 def _blocker_fingerprint(
@@ -203,6 +316,28 @@ def _review_intent_output(
         "hookSpecificOutput": {
             "hookEventName": "UserPromptSubmit",
             "additionalContext": context,
+        }
+    }
+
+
+def _combined_prompt_output(
+    payload: dict[str, Any],
+    prompt: object,
+    intent: str | None,
+    categories: tuple[str, ...],
+) -> dict[str, Any]:
+    route_signal = _route_signal(payload, prompt)
+    contexts = [
+        "Pilotfish automatic model route: "
+        + json.dumps(route_signal, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    ]
+    review_output = _review_intent_output(payload, intent, categories)
+    if review_output is not None:
+        contexts.append(review_output["hookSpecificOutput"]["additionalContext"])
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": "\n".join(contexts),
         }
     }
 
@@ -260,8 +395,14 @@ def _marker_path(codex_home: Path, session_id: str, *, create: bool) -> Path | N
     return directory / filename
 
 
-def _remove_marker(codex_home: Path, session_id: str) -> None:
-    path = _marker_path(codex_home, session_id, create=False)
+def _route_marker_path(codex_home: Path, session_id: str, *, create: bool) -> Path | None:
+    path = _marker_path(codex_home, session_id, create=create)
+    if path is None:
+        return None
+    return path.with_name(path.stem + ".route.json")
+
+
+def _unlink_marker(path: Path | None) -> None:
     if path is None:
         return
     try:
@@ -270,11 +411,20 @@ def _remove_marker(codex_home: Path, session_id: str) -> None:
         pass
 
 
-def _atomic_marker_write(codex_home: Path, marker: dict[str, Any]) -> bool:
-    session_id = marker["session_id"]
-    path = _marker_path(codex_home, session_id, create=True)
-    if path is None:
-        return False
+def _remove_review_marker(codex_home: Path, session_id: str) -> None:
+    _unlink_marker(_marker_path(codex_home, session_id, create=False))
+
+
+def _remove_route_marker(codex_home: Path, session_id: str) -> None:
+    _unlink_marker(_route_marker_path(codex_home, session_id, create=False))
+
+
+def _remove_marker(codex_home: Path, session_id: str) -> None:
+    _remove_review_marker(codex_home, session_id)
+    _remove_route_marker(codex_home, session_id)
+
+
+def _atomic_marker_write_at(path: Path, marker: dict[str, Any]) -> bool:
     payload = json.dumps(marker, separators=(",", ":"), sort_keys=True).encode() + b"\n"
     if len(payload) > MAX_MARKER_BYTES:
         return False
@@ -305,6 +455,16 @@ def _atomic_marker_write(codex_home: Path, marker: dict[str, Any]) -> bool:
                 temporary.unlink(missing_ok=True)
             except OSError:
                 pass
+
+
+def _atomic_marker_write(codex_home: Path, marker: dict[str, Any]) -> bool:
+    path = _marker_path(codex_home, marker["session_id"], create=True)
+    return path is not None and _atomic_marker_write_at(path, marker)
+
+
+def _atomic_route_marker_write(codex_home: Path, marker: dict[str, Any]) -> bool:
+    path = _route_marker_path(codex_home, marker["session_id"], create=True)
+    return path is not None and _atomic_marker_write_at(path, marker)
 
 
 def _read_bounded(descriptor: int, limit: int) -> bytes:
@@ -364,6 +524,50 @@ def _load_marker(codex_home: Path, session_id: str) -> dict[str, Any] | None:
         or categories != sorted(set(categories))
         or any(category not in _CATEGORY_PATTERNS for category in categories)
         or not categories
+    ):
+        return None
+    return marker
+
+
+def _load_route_marker(codex_home: Path, session_id: str) -> dict[str, Any] | None:
+    path = _route_marker_path(codex_home, session_id, create=False)
+    if path is None:
+        return None
+    try:
+        info = path.lstat()
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISREG(info.st_mode)
+            or (os.name != "nt" and stat.S_IMODE(info.st_mode) != 0o600)
+            or info.st_size > MAX_MARKER_BYTES
+        ):
+            return None
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags)
+        try:
+            opened = os.fstat(descriptor)
+            if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
+                return None
+            payload = _read_bounded(descriptor, MAX_MARKER_BYTES)
+        finally:
+            os.close(descriptor)
+        if len(payload) > MAX_MARKER_BYTES:
+            return None
+        marker = json.loads(payload)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(marker, dict) or set(marker) != _ROUTE_MARKER_KEYS:
+        return None
+    if (
+        marker.get("schema") != ROUTE_SCHEMA
+        or marker.get("session_id") != session_id
+        or not _valid_identifier(marker.get("turn_id"))
+        or marker.get("required_task") != ROUTE_REQUIRED_TASK
+        or marker.get("required_role") != "executor"
+        or marker.get("route") != "judgment"
+        or not isinstance(marker.get("attempted"), bool)
+        or not isinstance(marker.get("route_fingerprint"), str)
+        or not re.fullmatch(r"[0-9a-f]{64}", marker["route_fingerprint"])
     ):
         return None
     return marker
@@ -932,6 +1136,8 @@ def _direct_child_filter(
     *,
     session_id: str,
     turn_id: str,
+    required_role: str = "plan-verifier",
+    required_task: str = REQUIRED_TASK,
 ) -> tuple[bool, str | None]:
     sessions = [
         event["payload"]
@@ -967,7 +1173,7 @@ def _direct_child_filter(
             return False, None
         if not isinstance(arguments, dict):
             return False, None
-        if arguments.get("agent_type") != "plan-verifier":
+        if arguments.get("agent_type") != required_role:
             continue
         if (
             set(arguments) != {"message", "agent_type", "task_name", "fork_turns"}
@@ -978,7 +1184,7 @@ def _direct_child_filter(
             or arguments.get("fork_turns") not in {"none", "1", "2", "3"}
         ):
             return False, None
-        if arguments["task_name"] != REQUIRED_TASK:
+        if arguments["task_name"] != required_task:
             return False, None
         call_id = payload.get("call_id")
         if isinstance(call_id, str) and call_id:
@@ -1016,13 +1222,15 @@ def _handle_prompt(payload: dict[str, Any], codex_home: Path) -> dict[str, Any] 
     if payload.get("agent_id") is not None or payload.get("agent_type") is not None:
         _remove_marker(codex_home, session_id)
         return None
-    categories = classify_prompt(payload.get("prompt"))
-    intent = classify_review_intent(payload.get("prompt"))
+    prompt = payload.get("prompt")
+    categories = classify_prompt(prompt)
+    intent = classify_review_intent(prompt)
     if not _valid_identifier(turn_id):
         _remove_marker(codex_home, session_id)
         return None
+    route_signal = _route_signal(payload, prompt)
     if requires_sol_review(categories):
-        fingerprint = _blocker_fingerprint(payload.get("prompt"), categories)
+        fingerprint = _blocker_fingerprint(prompt, categories)
         previous = _load_marker(codex_home, session_id)
         if (
             fingerprint is not None
@@ -1043,9 +1251,38 @@ def _handle_prompt(payload: dict[str, Any], codex_home: Path) -> dict[str, Any] 
             }
         if not _atomic_marker_write(codex_home, marker):
             _remove_marker(codex_home, session_id)
+        else:
+            _remove_route_marker(codex_home, session_id)
+    elif route_signal["required_role"] == "executor":
+        _remove_review_marker(codex_home, session_id)
+        fingerprint = _blocker_fingerprint(
+            prompt,
+            ("model_route", route_signal["reason"]),
+        )
+        previous = _load_route_marker(codex_home, session_id)
+        if (
+            fingerprint is not None
+            and previous is not None
+            and previous["route_fingerprint"] == fingerprint
+        ):
+            marker = dict(previous)
+            marker["turn_id"] = turn_id
+        else:
+            marker = {
+                "schema": ROUTE_SCHEMA,
+                "session_id": session_id,
+                "turn_id": turn_id,
+                "required_task": ROUTE_REQUIRED_TASK,
+                "required_role": "executor",
+                "route": "judgment",
+                "attempted": False,
+                "route_fingerprint": fingerprint,
+            }
+        if not _atomic_route_marker_write(codex_home, marker):
+            _remove_route_marker(codex_home, session_id)
     else:
         _remove_marker(codex_home, session_id)
-    return _review_intent_output(payload, intent, categories)
+    return _combined_prompt_output(payload, prompt, intent, categories)
 
 
 def _handle_stop(payload: dict[str, Any], codex_home: Path) -> dict[str, str] | None:
@@ -1054,16 +1291,36 @@ def _handle_stop(payload: dict[str, Any], codex_home: Path) -> dict[str, str] | 
     if not _valid_identifier(session_id) or not _valid_identifier(turn_id):
         return None
     marker = _load_marker(codex_home, session_id)
-    if marker is None:
+    route_marker = None if marker is not None else _load_route_marker(codex_home, session_id)
+    if marker is None and route_marker is None:
         _remove_marker(codex_home, session_id)
         return None
-    if marker["turn_id"] != turn_id:
+    active_marker = marker if marker is not None else route_marker
+    if active_marker["turn_id"] != turn_id:
         _remove_marker(codex_home, session_id)
         return None
     events = _read_transcript(codex_home, payload.get("transcript_path"))
     if events is None:
         _remove_marker(codex_home, session_id)
         return None
+    if route_marker is not None:
+        direct_chain_valid, allowed_child_id = _direct_child_filter(
+            events,
+            session_id=session_id,
+            turn_id=turn_id,
+            required_role="executor",
+            required_task=ROUTE_REQUIRED_TASK,
+        )
+        if direct_chain_valid and allowed_child_id is not None:
+            _remove_route_marker(codex_home, session_id)
+            return None
+        if active_marker["attempted"]:
+            return None
+        active_marker["attempted"] = True
+        if not _atomic_route_marker_write(codex_home, active_marker):
+            _remove_route_marker(codex_home, session_id)
+            return None
+        return dict(MODEL_ROUTE_OUTPUT)
     direct_chain_valid, allowed_child_id = _direct_child_filter(
         events,
         session_id=session_id,

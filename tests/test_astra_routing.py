@@ -242,14 +242,14 @@ class AstraRoleRoutingTests(unittest.TestCase):
         self.assertEqual(candidate.as_dict(), {"model": "gpt-6-astra", "reasoning_effort": "high"})
         self.assertEqual(reason, "tool-complexity")
 
-    def test_routine_verifier_stays_luna(self) -> None:
+    def test_verifier_is_strong_by_default(self) -> None:
         candidate, reason = benchmark.select_role_candidate("verifier", complexity="routine")
-        self.assertEqual(candidate.as_dict(), {"model": "gpt-5.6-luna", "reasoning_effort": "xhigh"})
+        self.assertEqual(candidate.as_dict(), {"model": "gpt-6-astra", "reasoning_effort": "high"})
         self.assertEqual(reason, "baseline")
 
     def test_critical_without_an_allowed_capability_trigger_stays_baseline(self) -> None:
         candidate, reason = benchmark.select_role_candidate("verifier", complexity="critical")
-        self.assertEqual(candidate.as_dict(), {"model": "gpt-5.6-luna", "reasoning_effort": "xhigh"})
+        self.assertEqual(candidate.as_dict(), {"model": "gpt-6-astra", "reasoning_effort": "high"})
         self.assertEqual(reason, "baseline")
 
     def test_long_horizon_and_disagreement_are_explicit_astra_triggers(self) -> None:
@@ -473,8 +473,8 @@ class RoutingReceiptTests(unittest.TestCase):
         self.assertIn("Do not create a new computer-use role", policy)
         bootstrap = (ROOT / "templates" / "agents-md.bootstrap.md").read_text(encoding="utf-8")
         self.assertIn("Route by capability", bootstrap)
-        self.assertIn("tool or evidence trigger", benchmark.PARENT_PROMPT)
-        self.assertIn("difficulty alone", benchmark.PARENT_PROMPT)
+        self.assertIn("atomic one-command/one-action", benchmark.PARENT_PROMPT)
+        self.assertIn("installed Astra executor", benchmark.PARENT_PROMPT)
         self.assertIn("max_tool_calls=20", benchmark.PARENT_PROMPT)
         self.assertIn("smallest sufficient change", benchmark.PARENT_PROMPT)
 

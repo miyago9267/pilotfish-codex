@@ -82,11 +82,12 @@ benchmark used a fixed artifact task as a native-rollout proxy:
   alt="Median wall time per candidate"
   width="720">
 
-That supports Luna for routine `executor`, `mech-executor`, and verification
-work; Sol for narrower `plan-verifier` and security review boundaries where
-independent high-effort judgment is worth the cost; and no active Terra tier.
-This is a routing decision, not a general intelligence ranking. The complete
-benchmark and bar charts are in the
+That supports cheap Luna for one-command/one-action and mechanical work; Astra
+for design, tool choice, interpretation, multi-step execution, and strong
+verification; and Sol for narrower `plan-verifier` and security review
+boundaries. The root model does not switch automatically. This is a routing
+decision, not a general intelligence ranking. The complete benchmark and bar
+charts are in the
 [usage-routing benchmark](./docs/benchmarks/usage-routing-v1/README.md).
 
 ## Opt-in Astra main-session mode
@@ -103,11 +104,13 @@ codex --model gpt-6-astra \
   -c agents.max_concurrent_threads_per_session=1
 ```
 
-The overrides are zero-write and session-only; the installed Luna/Sol config,
+The overrides are zero-write and session-only; the installed root Luna/Plan and
+Sol review config,
 roles, hooks, and approval boundaries remain unchanged. The prompt recommends
 named inputs, one sufficient pass, and stopping at acceptance evidence. Its
 `max_tool_calls=12` and `max_wall_seconds=300` limits are advisory, not a
-provider-enforced quota. `mech-executor` and `scout` stay on Luna, and
+provider-enforced quota. `mech-executor` and `scout` stay on Luna, while
+judgment-heavy `executor` and `verifier` routes use Astra, and
 `plan-verifier` stays on Sol/high. If Astra is unavailable or an override is
 invalid, activation fails closed before task work; start a new session without
 the flags to return to the normal policy.

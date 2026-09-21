@@ -70,9 +70,9 @@ artifact task 作為 native-rollout proxy：
 
 <img src="./assets/v6-median-wall-time-zh-TW.svg" alt="每個候選者的中位 wall time" width="720">
 
-因此，routine 的 `executor`、`mech-executor` 與 verification 工作使用 Luna；
-較窄的 `plan-verifier` 與 security review 使用 Sol，讓較高成本換取獨立的
-高 effort 判斷；Terra 不設 active tier。這是 routing decision，不是通用的
+因此，一個 command／一個 action 的 `mech-executor` 與 scout 工作使用 Luna；
+需要設計、工具、解讀與 QA 的 `executor`／`verifier` 自動使用 Astra，較窄的
+`plan-verifier` 與 security review 使用 Sol；Terra 不設 active tier。這是 routing decision，不是通用的
 intelligence ranking。完整 benchmark 與 bar charts 請看
 [usage-routing benchmark](./benchmarks/usage-routing-v1/README.md)。
 

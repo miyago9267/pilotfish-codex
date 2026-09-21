@@ -1,7 +1,7 @@
 ---
 id: spec-active-role-routing-repair
 title: Active Codex role routing repair
-status: in_progress
+status: superseded
 created: 2026-09-17
 updated: 2026-09-17
 owner: Miyago
@@ -12,6 +12,10 @@ priority: high
 <!-- markdownlint-disable MD025 -->
 
 # Active Codex role routing repair
+
+> Superseded on 2026-09-21 by `docs/specs/automatic-model-routing/SPEC.md` for
+> automatic model escalation. This spec remains the historical role-availability
+> slice and no longer owns the production model distribution.
 
 ## Goal
 
@@ -70,3 +74,11 @@ session 在有清楚 bounded workstream 或必要 review 時主動使用 typed r
 Stop after the active role manifest is installed, the canonical adapter is
 regenerated, and the required local and fresh-session checks have a truthful
 `CONFIRMED`, `REFUTED`, or `INCONCLUSIVE` result.
+
+## Supersession note
+
+The earlier decision to preserve all Luna/Sol bindings and prohibit automatic
+Astra promotion applied to the role-availability repair only. The follow-up
+automatic-model-routing spec supersedes that model-distribution decision while
+retaining the seven-role manifest, typed dispatch contract, approval boundaries,
+and live-evidence limitation.

@@ -17,5 +17,5 @@ tag or full commit SHA, then fetch and follow that ref's `INSTALL.md`. Do not
 assume `main` or invent a ref.
 
 Keep the installed default Luna/Sol policy unchanged. Do not edit `config.toml`
-to enable Astra; users opt into the zero-write main-session command separately
-when they explicitly choose Astra.
+to enable Astra; automatic typed roles may use installed bindings; users opt into
+the zero-write main-session command separately when they explicitly choose Astra.

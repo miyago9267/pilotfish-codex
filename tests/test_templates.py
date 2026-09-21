@@ -47,7 +47,7 @@ class NativeTemplateTests(unittest.TestCase):
         )
         self.assertEqual(
             (verifier["model"], verifier["model_reasoning_effort"]),
-            ("gpt-5.6-luna", "xhigh"),
+            ("gpt-6-astra", "high"),
         )
         self.assertEqual(
             (security_executor["model"], security_executor["model_reasoning_effort"]),
@@ -55,7 +55,7 @@ class NativeTemplateTests(unittest.TestCase):
         )
         self.assertEqual(
             (executor["model"], executor["model_reasoning_effort"]),
-            ("gpt-5.6-luna", "max"),
+            ("gpt-6-astra", "high"),
         )
         for path in agents.glob("*.toml"):
             with path.open("rb") as handle:

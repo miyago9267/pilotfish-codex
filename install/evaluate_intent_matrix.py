@@ -64,9 +64,18 @@ def _signal_from_output(case: dict[str, Any], output: dict[str, Any] | None) -> 
         context = output["hookSpecificOutput"]["additionalContext"]
     except (KeyError, TypeError) as exc:
         raise ValueError(f"case {case['id']} hook signal shape is invalid") from exc
-    if not isinstance(context, str) or "Pilotfish review intent signal: " not in context:
+    if not isinstance(context, str):
         raise ValueError(f"case {case['id']} hook signal context is invalid")
-    encoded = context.split("Pilotfish review intent signal: ", 1)[1]
+    if "Pilotfish review intent signal: " not in context:
+        route_prefix = "Pilotfish automatic model route: "
+        if route_prefix not in context:
+            raise ValueError(f"case {case['id']} hook signal context is invalid")
+        encoded_route = context.split(route_prefix, 1)[1].split("\n", 1)[0]
+        route = json.loads(encoded_route)
+        if not isinstance(route, dict) or route.get("turn_id") != case["id"]:
+            raise ValueError(f"case {case['id']} automatic route context is invalid")
+        return None
+    encoded = context.split("Pilotfish review intent signal: ", 1)[1].split("\n", 1)[0]
     return validate_signal(json.loads(encoded))
 
 
@@ -86,7 +95,9 @@ def evaluate(matrix: dict[str, Any]) -> dict[str, Any]:
             intent_ok = actual_intent is None
         expected_categories = tuple(expected["risk_categories"])
         category_ok = categories == expected_categories
-        signal_ok = (signal is None and actual_intent is None) or (
+        context = output.get("hookSpecificOutput", {}).get("additionalContext", "") if output else ""
+        route_signal_present = isinstance(context, str) and "Pilotfish automatic model route: " in context
+        signal_ok = (signal is None and actual_intent is None and route_signal_present) or (
             signal is not None
             and signal["turn_id"] == case["id"]
             and "prompt" not in signal
@@ -107,7 +118,7 @@ def evaluate(matrix: dict[str, Any]) -> dict[str, Any]:
             "sol_trigger_expected": sol_expected,
             "sol_trigger_observed": sol_actual,
             "signal_contract_valid": signal_ok,
-            "hook_process_valid": output is None or signal is not None,
+            "hook_process_valid": output is None or signal is not None or route_signal_present,
             "hard_gate_preserved": expected["hard_gate_preserved"],
         }
         rows.append(row)
@@ -118,7 +129,9 @@ def evaluate(matrix: dict[str, Any]) -> dict[str, Any]:
         counters["signal_total"] += int(actual_intent is not None)
         counters["signal_correct"] += int(signal_ok and actual_intent is not None)
         counters["hook_process_total"] += 1
-        counters["hook_process_correct"] += int(output is None or signal is not None)
+        counters["hook_process_correct"] += int(
+            output is None or signal is not None or route_signal_present
+        )
         counters["sol_total"] += 1
         counters["sol_correct"] += int(sol_actual == sol_expected)
         hard_gate_by_scenario.setdefault(case["scenario"], set()).add(

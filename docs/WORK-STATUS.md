@@ -2,7 +2,7 @@
 id: pilotfish-work-status
 title: Pilotfish Codex work status
 status: active
-updated: 2026-09-17
+updated: 2026-09-21
 owner: Miyago
 ---
 
@@ -12,26 +12,42 @@ owner: Miyago
 
 ## Current objective
 
-收斂 active-role routing repair：有效 Orca `CODEX_HOME` 載入七個 native roles，
-主 session 對 bounded workstream 與必要 review 主動 dispatch，緊密 local work
-仍留在 parent；並以 offline contract 與 fresh-process evidence 保持驗證邊界。
+建立 automatic model routing：一個 command／一個 action 留在 cheap Luna path，
+需要設計、工具、解讀、多步驟或不確定性時自動開 strong typed role，並保留防止
+tunnel vision 的固定工作包與一次性升級邊界。
 
-## Current release candidate — v1.8.0-rc.5
+## Current release candidate — v1.8.0-rc.6
+
+- [x] Automatic model routing spec and route-marker implementation are implemented.
+- [x] `UserPromptSubmit` now emits a redacted `atomic`/`judgment` route signal;
+  judgment turns require `executor` and uncertain routes choose judgment.
+- [x] Stop hook retries a missing typed `executor` route once and does not ask
+  Miyago to name the role.
+- [x] `executor` and `verifier` templates now bind to `gpt-6-astra@high`;
+  `mech-executor` and `scout` remain cheap Luna roles.
+- [x] Prompt-lock and full test pass; effective Orca home roles and full
+  `~/.codex` installer dry-run are verified.
+- [x] Commit `cc18e67` and full global hook/Plugin install are complete; the
+  installer state is committed as v4 with Plugin `1.8.0-rc.6`.
+- [ ] Live automatic task-class selection remains unverified; static route and
+  typed-dispatch evidence cannot prove every natural-language turn.
 
 - [x] `VERSION`, Plugin manifest, installer constant, and policy markers are
-  synchronized to `1.8.0-rc.5`; the prompt lock remains unchanged and passes.
-- [x] Add `--roles-only` so a Codex home with externally co-managed policy or
-  hooks can receive only the seven native role TOMLs without changing config,
-  hooks, Plugin, or installer state.
-- [x] Update the canonical Codex adapter and bootstrap with proactive bounded
-  typed-role dispatch, parent-local tight work, outcome-level continuation, and
-  the existing Luna/Sol/Astra boundaries.
-- [x] Deploy and validate the seven exact role payloads under the effective Orca
-  home with mode `0600`; policy and hooks remain external symlinks.
-- [x] Offline verification: `429 tests`, `1 skipped`, prompt lock, strict config,
+  synchronized to `1.8.0-rc.6`.
+
+### Inherited rc.5 evidence
+
+The following evidence belongs to the pre-escalation `rc.5` state and must be
+rechecked after the new role bindings are installed:
+
+- [x] `--roles-only` preserves co-managed policy, hooks, config, Plugin, state,
+  and customized same-name roles.
+- [x] The effective home contained the seven exact role payloads with mode
+  `0600`; policy and hooks remained external symlinks.
+- [x] Prior offline verification passed `429 tests`, prompt lock, strict config,
   role validation, Python compile, shell syntax, mirror equality, and diff check.
-- [ ] Paid live named-role dispatch probe remains unrun; static setup proves role
-  availability and policy intent but does not prove automatic task-class choice.
+- [ ] Paid live named-role dispatch remains unrun; the new route contract does
+  not claim automatic task-class selection without fresh runtime evidence.
 
 ## Previous release candidate — v1.8.0-rc.4
 

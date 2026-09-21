@@ -24,6 +24,13 @@ Classify the request before acting:
 Keep the task boundary as `goal -> in-scope -> stop condition`. Do not expand
 into adjacent cleanup unless correctness or safety requires it.
 
+Before the first tool action, route one-command/one-action work to the cheap
+parent or `mech-executor`. Route design, tool choice, output interpretation,
+multi-step work, and uncertainty automatically to the installed strong
+`executor` role; do not wait for the user to request delegation. An unexpected
+cheap result escalates once to `executor` and then stops if the role is
+unavailable.
+
 ## Role routing
 
 Use the native Pilotfish roles when the task benefits from independent bounded

@@ -7,6 +7,16 @@ are noted only as source references.
 
 ## Unreleased
 
+## v1.8.0-rc.6
+
+- Add automatic atomic-versus-judgment model routing: one-command actions stay
+  on cheap Luna, while design, tool choice, interpretation, multi-step work,
+  and uncertainty automatically open the strong Astra `executor` role.
+- Add a redacted route signal and one-shot Stop-hook escalation when the strong
+  role was not opened; preserve the existing approval and security boundaries.
+- Promote `executor` and `verifier` production bindings to Astra/high and keep
+  `mech-executor` and `scout` on cheap Luna bindings.
+
 ## v1.8.0-rc.5
 
 - Add an isolated `--roles-only` installer path for Codex homes whose policy or

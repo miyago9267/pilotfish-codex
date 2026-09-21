@@ -37,9 +37,10 @@ inspecting the home.
 
 ## Optional Astra main-session mode
 
-The installer keeps the default Luna/Sol policy. To opt into Astra for one
-root session, start Codex with launch-time overrides instead of editing
-`config.toml`:
+The installer keeps the default root Luna/Plan and Sol review policy. The
+automatic route may use the installed strong `executor`/`verifier` bindings.
+To opt into Astra for the root session itself, start Codex with launch-time
+overrides instead of editing `config.toml`:
 
 ```bash
 codex --model gpt-6-astra \
