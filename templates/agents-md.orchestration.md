@@ -1,5 +1,5 @@
 <!-- pilotfish-codex:begin -->
-<!-- pilotfish-codex v1.8.0-rc.9 -->
+<!-- pilotfish-codex v1.8.0 -->
 <!-- markdownlint-disable-next-line MD041 -->
 ### Orchestration
 

@@ -17,7 +17,7 @@ owner: Miyago
 QA 與 bounded implementation 使用 Sol；只有深層架構或衝突證據才自動開 Astra
 typed role，並保留防止 tunnel vision 的固定工作包與一次性升級邊界。
 
-## Current release candidate — v1.8.0-rc.9
+## Current release — v1.8.0
 
 - [x] Automatic model routing spec and route-marker implementation are implemented.
 - [x] `UserPromptSubmit` now emits a redacted `atomic`/`guarded`/`judgment`/
@@ -29,12 +29,15 @@ typed role，並保留防止 tunnel vision 的固定工作包與一次性升級�
   `gpt-5.6-sol@high`; only deep `executor` remains `gpt-6-astra@high`.
 - [x] Prompt-lock and full test pass; effective Orca home roles and full
   `~/.codex` installer dry-run are verified.
-- [ ] Full global hook/Plugin install for rc.9 is pending local verification.
+- [x] Full global hook/Plugin install for `1.8.0` is verified in the active
+  Orca home and the primary `/Users/miyago/.codex` home.
+- [x] Echoed `ROUTE_ESCALATION_REQUIRED` output is covered by a regression
+  test and remains on the guarded parent-local path.
 - [ ] Live automatic task-class selection remains unverified; static route and
   typed-dispatch evidence cannot prove every natural-language turn.
 
 - [x] `VERSION`, Plugin manifest, installer constant, and policy markers are
-  synchronized to `1.8.0-rc.9`.
+  synchronized to `1.8.0`.
 
 ### Inherited rc.5 evidence
 

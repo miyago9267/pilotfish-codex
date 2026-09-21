@@ -7,6 +7,16 @@ are noted only as source references.
 
 ## Unreleased
 
+## v1.8.0
+
+- Promote the Luna/Sol/Astra automatic routing policy from the release
+  candidate to a stable snapshot: simple actions stay on Luna, normal
+  judgment uses Sol, and Astra remains reserved for deep boundaries.
+- Prevent an echoed `ROUTE_ESCALATION_REQUIRED` directive from being parsed as
+  a new task and reopening the automatic escalation loop.
+- Verify the release snapshot with the complete offline suite and active Orca
+  hook smoke.
+
 ## v1.8.0-rc.9
 
 - Add Sol as the normal judgment and implementation tier through `sol-executor`

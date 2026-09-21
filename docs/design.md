@@ -47,8 +47,8 @@ routine and mechanical work stays on the installed Luna roles. The
 prompt's `max_tool_calls=12` and `max_wall_seconds=300` values are advisory
 usage guards, not provider quota enforcement. Invalid or unavailable Astra
 activation fails closed before task work; a separately started no-flags session
-returns to the normal root Luna/Sol policy. `plan-verifier` remains Sol/high and all
-approval, security, release, and fresh-verifier boundaries remain intact. This
+returns to the normal root Luna/Sol policy. `plan-verifier` remains Sol/high and
+all approval, security, release, and fresh-verifier boundaries remain intact. This
 slice adds no main-session typed-dispatch receipt field; existing child receipt
 schemas remain unchanged.
 
