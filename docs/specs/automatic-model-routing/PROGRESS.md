@@ -10,12 +10,15 @@
 
 - The source role manifest binds `executor` and `verifier` to `gpt-6-astra@high`;
   `mech-executor` and `scout` remain cheap Luna roles.
-- The hook emits a redacted `atomic`/`judgment` route signal and retries one
-  missing typed `executor` escalation without asking the user to name a role.
+- The hook emits a redacted `atomic`/`judgment` route signal with trigger,
+  purpose, escalation conditions, and exact typed dispatch fields; it retries
+  one missing `executor` escalation without asking the user to name a role.
+- A Stop-hook continuation now respects `stop_hook_active` and clears its route
+  marker instead of re-locking the session.
 - The earlier active-role repair preserved Luna/Sol bindings; this spec supersedes
   that decision for the new routing surface.
 - `codex --strict-config doctor --summary` passed on Codex `0.154.0`; installer
-  state v4 reports integrated Plugin `1.8.0-rc.6` and both active homes expose
+  state v4 reports integrated Plugin `1.8.0-rc.7` and both active homes expose
   the Astra strong bindings.
 
 ## Slice tracking

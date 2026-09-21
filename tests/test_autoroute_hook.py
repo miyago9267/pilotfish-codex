@@ -151,6 +151,10 @@ class AutorouteHookTests(unittest.TestCase):
             self.assertIn('"route":"atomic"', context)
             self.assertIn('"model_policy":"cheap"', context)
             self.assertIn('"required_role":"none"', context)
+            self.assertIn('"trigger":"prompt_submit"', context)
+            self.assertIn('"purpose":"local_atomic_action"', context)
+            self.assertIn('"dispatch":{"mode":"parent_local"}', context)
+            self.assertIn('"escalate_on":["unexpected_result","error","retry","target_change","unlisted_next_action"]', context)
             self.assertEqual(list((home / gate.MARKER_DIRECTORY).glob("*.json")), [])
 
     def test_judgment_route_automatically_requires_strong_executor(self) -> None:
@@ -169,6 +173,13 @@ class AutorouteHookTests(unittest.TestCase):
             self.assertIn('"model_policy":"strong"', context)
             self.assertIn('"required_role":"executor"', context)
             self.assertIn("gpt-6-astra@high", context)
+            self.assertIn('"purpose":"bounded_judgment_execution"', context)
+            self.assertIn(
+                '"dispatch":{"agent_type":"executor","fork_turns":"none",'
+                '"mode":"typed_role","task_name":"automatic_model_route"}',
+                context,
+            )
+            self.assertIn('"escalate_on":[]', context)
             marker = gate._route_marker_path(home, SESSION, create=False)
             self.assertIsNotNone(marker)
             self.assertEqual(json.loads(marker.read_text())["required_role"], "executor")
@@ -188,9 +199,57 @@ class AutorouteHookTests(unittest.TestCase):
                 gate.handle(stop_input(transcript), codex_home=home),
                 gate.MODEL_ROUTE_OUTPUT,
             )
+            self.assertIn("`fork_turns=none`", gate.MODEL_ROUTE_OUTPUT["reason"])
+            self.assertIn("`task_name=automatic_model_route`", gate.MODEL_ROUTE_OUTPUT["reason"])
             marker = gate._route_marker_path(home, SESSION, create=False)
             self.assertTrue(json.loads(marker.read_text())["attempted"])
             self.assertIsNone(gate.handle(stop_input(transcript), codex_home=home))
+
+    def test_route_continuation_does_not_relock_when_stop_is_already_active(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "codex-home"
+            home.mkdir()
+            transcript = home / "sessions" / "rollout.jsonl"
+            gate.handle(
+                prompt_input("請診斷這個跨檔案 bug，並用工具驗證修復。"),
+                codex_home=home,
+            )
+            write_events(transcript, [session_meta(), task_started()])
+
+            self.assertEqual(
+                gate.handle(stop_input(transcript), codex_home=home),
+                gate.MODEL_ROUTE_OUTPUT,
+            )
+            continuation_turn = "route-continuation"
+            continuation = gate.handle(
+                prompt_input(
+                    gate.MODEL_ROUTE_OUTPUT["reason"],
+                    turn_id=continuation_turn,
+                ),
+                codex_home=home,
+            )
+            self.assertIsInstance(continuation, dict)
+            self.assertIn(
+                '"task_name":"automatic_model_route"',
+                continuation["hookSpecificOutput"]["additionalContext"],
+            )
+            write_events(
+                transcript,
+                [session_meta(), task_started()],
+            )
+            self.assertIsNone(
+                gate.handle(
+                    stop_input(
+                        transcript,
+                        turn_id=continuation_turn,
+                        active=True,
+                    ),
+                    codex_home=home,
+                )
+            )
+            route_marker = gate._route_marker_path(home, SESSION, create=False)
+            self.assertIsNotNone(route_marker)
+            self.assertFalse(route_marker.exists())
 
     def test_judgment_route_clears_after_matching_executor_spawn(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

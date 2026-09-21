@@ -7,6 +7,13 @@ are noted only as source references.
 
 ## Unreleased
 
+## v1.8.0-rc.7
+
+- Make the automatic route signal declare its trigger, purpose, escalation
+  conditions, and exact typed dispatch contract.
+- Prevent a Stop-hook route continuation from re-locking after Codex has already
+  continued the turn; include the required `fork_turns=none` dispatch boundary.
+
 ## v1.8.0-rc.6
 
 - Add automatic atomic-versus-judgment model routing: one-command actions stay

@@ -17,8 +17,15 @@ from typing import Any
 
 SCHEMA = 2
 REQUIRED_TASK = "automatic_plan_review"
-ROUTE_SCHEMA = 1
+ROUTE_SCHEMA = 2
 ROUTE_REQUIRED_TASK = "automatic_model_route"
+ROUTE_ESCALATION_EVENTS = (
+    "unexpected_result",
+    "error",
+    "retry",
+    "target_change",
+    "unlisted_next_action",
+)
 MARKER_DIRECTORY = ".pilotfish-autoroute-gate"
 MAX_HOOK_INPUT_BYTES = 1_048_576
 MAX_PROMPT_CHARS = 65_536
@@ -48,10 +55,14 @@ MODEL_ROUTE_OUTPUT = {
     "decision": "block",
     "reason": (
         "Status: ROUTE_ESCALATION_REQUIRED. This turn needs design, tool use, "
-        "interpretation, or multiple steps. Automatically call the typed "
-        "`executor` role now; it is the strong `gpt-6-astra@high` binding. "
-        "Do not ask the user to request a role or choose the next phase. "
-        "Keep the existing goal, target, acceptance, and stop condition."
+        "interpretation, or multiple steps. The hook has opened one bounded "
+        "continuation. On this continuation, immediately call exactly one "
+        "native typed `spawn_agent` with `agent_type=executor`, "
+        "`task_name=automatic_model_route`, and `fork_turns=none`; use a "
+        "bounded message that preserves the existing goal, target, acceptance, "
+        "and stop condition. Do not use a full-history fork, pass model or "
+        "reasoning overrides, ask the user to request a role, or choose the "
+        "next phase."
     ),
 }
 
@@ -249,22 +260,40 @@ def _route_signal(payload: dict[str, Any], prompt: object) -> dict[str, Any]:
         required_role = "security-reviewer"
         model_policy = "specialized"
         model_snapshot = "gpt-5.6-sol@high"
+        purpose = "pre_approval_security_review"
+        dispatch = {"mode": "existing_review_gate"}
+        escalate_on: list[str] = []
     elif route == "atomic":
         required_role = "none"
         model_policy = "cheap"
         model_snapshot = "gpt-5.6-luna@medium"
+        purpose = "local_atomic_action"
+        dispatch = {"mode": "parent_local"}
+        escalate_on = list(ROUTE_ESCALATION_EVENTS)
     else:
         required_role = "executor"
         model_policy = "strong"
         model_snapshot = "gpt-6-astra@high"
+        purpose = "bounded_judgment_execution"
+        dispatch = {
+            "agent_type": "executor",
+            "fork_turns": "none",
+            "mode": "typed_role",
+            "task_name": ROUTE_REQUIRED_TASK,
+        }
+        escalate_on = []
     return {
         "schema": ROUTE_SCHEMA,
         "session_id": payload["session_id"],
         "turn_id": payload["turn_id"],
+        "trigger": "prompt_submit",
+        "purpose": purpose,
         "route": route,
         "model_policy": model_policy,
         "required_role": required_role,
         "model_snapshot": model_snapshot,
+        "dispatch": dispatch,
+        "escalate_on": escalate_on,
         "reason": execution_route_reason(prompt, route),
     }
 
@@ -1304,6 +1333,9 @@ def _handle_stop(payload: dict[str, Any], codex_home: Path) -> dict[str, str] | 
         _remove_marker(codex_home, session_id)
         return None
     if route_marker is not None:
+        if payload.get("stop_hook_active") is not False:
+            _remove_route_marker(codex_home, session_id)
+            return None
         direct_chain_valid, allowed_child_id = _direct_child_filter(
             events,
             session_id=session_id,

@@ -20,7 +20,10 @@ strong typed role。Miyago 不需要在 prompt 中要求「開多 role」。
 
 ## Scope
 
-- 在 `UserPromptSubmit` 產生保守、redacted 的 atomic/judgment route signal。
+- 在 `UserPromptSubmit` 由 hook 判定啟動時機與實現目的，產生保守、redacted
+  的 atomic/judgment route signal。
+- route signal 明確帶出 escalation 條件與 dispatch contract，讓 parent 不必
+  猜測是否要開 role、使用哪個 task 或 fork 邊界。
 - 對非 atomic turn 自動要求 `executor` typed role；該 role 綁定
   `gpt-6-astra@high`。
 - 對 atomic turn 保持 parent-local cheap execution，不建立 child。
@@ -67,7 +70,8 @@ cheap action 的工作包固定為 `goal -> target -> exact action -> expected s
 - 設計、工具選擇、模糊需求與多步驟 prompt 產生 `judgment` signal，且要求
   `executor`。
 - judgment turn 沒有 typed `executor` 時，Stop hook 只重試一次並給出固定 route
-  directive；已有正確 child 時不重試。
+  directive；directive 固定 `agent_type=executor`、`task_name=automatic_model_route`
+  與 `fork_turns=none`。Codex 已由 Stop hook 續行後，不得再次鎖住同一 session。
 - `executor` 與相關 strong route 的實際 role binding 是
   `gpt-6-astra@high`；`mech-executor` 與 `scout` 維持 cheap Luna binding。
 - 既有 mandatory security／permission／external／destructive gates 的測試不退化。

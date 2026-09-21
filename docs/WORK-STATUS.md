@@ -16,24 +16,24 @@ owner: Miyago
 需要設計、工具、解讀、多步驟或不確定性時自動開 strong typed role，並保留防止
 tunnel vision 的固定工作包與一次性升級邊界。
 
-## Current release candidate — v1.8.0-rc.6
+## Current release candidate — v1.8.0-rc.7
 
 - [x] Automatic model routing spec and route-marker implementation are implemented.
-- [x] `UserPromptSubmit` now emits a redacted `atomic`/`judgment` route signal;
-  judgment turns require `executor` and uncertain routes choose judgment.
-- [x] Stop hook retries a missing typed `executor` route once and does not ask
-  Miyago to name the role.
+- [x] `UserPromptSubmit` now emits a redacted `atomic`/`judgment` route signal
+  with trigger, purpose, escalation conditions, and typed dispatch fields.
+- [x] Stop hook retries a missing typed `executor` route once, pins
+  `fork_turns=none`, and does not re-lock an already continued turn.
 - [x] `executor` and `verifier` templates now bind to `gpt-6-astra@high`;
   `mech-executor` and `scout` remain cheap Luna roles.
 - [x] Prompt-lock and full test pass; effective Orca home roles and full
   `~/.codex` installer dry-run are verified.
-- [x] Commit `cc18e67` and full global hook/Plugin install are complete; the
-  installer state is committed as v4 with Plugin `1.8.0-rc.6`.
+- [x] Full global hook/Plugin install is complete; the installer state is
+  committed as v4 with Plugin `1.8.0-rc.7`.
 - [ ] Live automatic task-class selection remains unverified; static route and
   typed-dispatch evidence cannot prove every natural-language turn.
 
 - [x] `VERSION`, Plugin manifest, installer constant, and policy markers are
-  synchronized to `1.8.0-rc.6`.
+  synchronized to `1.8.0-rc.7`.
 
 ### Inherited rc.5 evidence
 
