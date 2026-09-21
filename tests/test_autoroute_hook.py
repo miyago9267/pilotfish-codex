@@ -157,10 +157,9 @@ class AutorouteHookTests(unittest.TestCase):
             self.assertIn('"escalate_on":["unexpected_result","error","retry","target_change","unlisted_next_action"]', context)
             self.assertEqual(list((home / gate.MARKER_DIRECTORY).glob("*.json")), [])
 
-    def test_routine_judgment_and_uncertainty_stay_on_cheap_guarded_route(self) -> None:
+    def test_routine_and_uncertain_work_stay_on_cheap_guarded_route(self) -> None:
         prompts = (
             "Astra可以少量出現，但不能隨便就冒出來啊不然會貴死",
-            "請設計這個 parser 的修復流程。",
             "請用工具檢查這個本地設定。",
         )
         for prompt in prompts:
@@ -179,7 +178,51 @@ class AutorouteHookTests(unittest.TestCase):
                 self.assertNotIn("gpt-6-astra@high", context)
                 self.assertEqual(list((home / gate.MARKER_DIRECTORY).glob("*.json")), [])
 
-    def test_judgment_route_automatically_requires_strong_executor(self) -> None:
+    def test_judgment_route_automatically_requires_sol_executor(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "codex-home"
+            home.mkdir()
+
+            payload = gate.handle(
+                prompt_input("請設計這個 parser 的修復流程。"),
+                codex_home=home,
+            )
+
+            self.assertIsInstance(payload, dict)
+            context = payload["hookSpecificOutput"]["additionalContext"]
+            self.assertIn('"route":"judgment"', context)
+            self.assertIn('"model_policy":"capable"', context)
+            self.assertIn('"required_role":"sol-executor"', context)
+            self.assertIn("gpt-5.6-sol@high", context)
+            self.assertNotIn("gpt-6-astra@high", context)
+            self.assertIn('"purpose":"bounded_judgment_execution"', context)
+            self.assertIn(
+                '"dispatch":{"agent_type":"sol-executor","fork_turns":"none",'
+                '"mode":"typed_role","task_name":"automatic_model_route"}',
+                context,
+            )
+            marker = gate._route_marker_path(home, SESSION, create=False)
+            self.assertIsNotNone(marker)
+            self.assertEqual(json.loads(marker.read_text())["required_role"], "sol-executor")
+
+    def test_qa_route_automatically_requires_sol_executor(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "codex-home"
+            home.mkdir()
+
+            payload = gate.handle(
+                prompt_input("請做 QA，確認這個 parser 的修復符合驗收條件。"),
+                codex_home=home,
+            )
+
+            self.assertIsInstance(payload, dict)
+            context = payload["hookSpecificOutput"]["additionalContext"]
+            self.assertIn('"route":"judgment"', context)
+            self.assertIn('"required_role":"sol-executor"', context)
+            self.assertIn("gpt-5.6-sol@high", context)
+            self.assertNotIn("gpt-6-astra@high", context)
+
+    def test_deep_judgment_route_automatically_requires_strong_executor(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "codex-home"
             home.mkdir()
@@ -193,11 +236,11 @@ class AutorouteHookTests(unittest.TestCase):
 
             self.assertIsInstance(payload, dict)
             context = payload["hookSpecificOutput"]["additionalContext"]
-            self.assertIn('"route":"judgment"', context)
+            self.assertIn('"route":"deep_judgment"', context)
             self.assertIn('"model_policy":"strong"', context)
             self.assertIn('"required_role":"executor"', context)
             self.assertIn("gpt-6-astra@high", context)
-            self.assertIn('"purpose":"bounded_judgment_execution"', context)
+            self.assertIn('"purpose":"bounded_deep_judgment_execution"', context)
             self.assertIn(
                 '"dispatch":{"agent_type":"executor","fork_turns":"none",'
                 '"mode":"typed_role","task_name":"automatic_model_route"}',
@@ -208,7 +251,7 @@ class AutorouteHookTests(unittest.TestCase):
             self.assertIsNotNone(marker)
             self.assertEqual(json.loads(marker.read_text())["required_role"], "executor")
 
-    def test_judgment_route_retries_once_when_executor_was_not_opened(self) -> None:
+    def test_deep_judgment_route_retries_once_when_executor_was_not_opened(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "codex-home"
             home.mkdir()
@@ -279,7 +322,7 @@ class AutorouteHookTests(unittest.TestCase):
             self.assertIsNotNone(route_marker)
             self.assertFalse(route_marker.exists())
 
-    def test_judgment_route_clears_after_matching_executor_spawn(self) -> None:
+    def test_deep_judgment_route_clears_after_matching_executor_spawn(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "codex-home"
             home.mkdir()
@@ -325,6 +368,70 @@ class AutorouteHookTests(unittest.TestCase):
             route_marker = gate._route_marker_path(home, SESSION, create=False)
             self.assertIsNotNone(route_marker)
             self.assertFalse(route_marker.exists())
+
+    def test_judgment_route_clears_after_matching_sol_executor_spawn(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "codex-home"
+            home.mkdir()
+            transcript = home / "sessions" / "rollout.jsonl"
+            gate.handle(
+                prompt_input("請設計這個 parser 的修復流程。"),
+                codex_home=home,
+            )
+            write_events(
+                transcript,
+                [
+                    session_meta(),
+                    task_started(),
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call",
+                            "name": "spawn_agent",
+                            "call_id": "sol-executor-call",
+                            "arguments": json.dumps(
+                                {
+                                    "message": "Own the bounded implementation.",
+                                    "agent_type": "sol-executor",
+                                    "task_name": "automatic_model_route",
+                                    "fork_turns": "none",
+                                }
+                            ),
+                        },
+                    },
+                    {
+                        "type": "event_msg",
+                        "payload": {
+                            "type": "sub_agent_activity",
+                            "kind": "started",
+                            "event_id": "sol-executor-call",
+                            "agent_thread_id": "sol-executor-child",
+                        },
+                    },
+                ],
+            )
+
+            self.assertIsNone(gate.handle(stop_input(transcript), codex_home=home))
+            route_marker = gate._route_marker_path(home, SESSION, create=False)
+            self.assertIsNotNone(route_marker)
+            self.assertFalse(route_marker.exists())
+
+    def test_judgment_route_retries_with_sol_executor_when_child_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "codex-home"
+            home.mkdir()
+            transcript = home / "sessions" / "rollout.jsonl"
+            gate.handle(
+                prompt_input("請設計這個 parser 的修復流程。"),
+                codex_home=home,
+            )
+            write_events(transcript, [session_meta(), task_started()])
+
+            output = gate.handle(stop_input(transcript), codex_home=home)
+
+            self.assertIsNotNone(output)
+            self.assertIn("`agent_type=sol-executor`", output["reason"])
+            self.assertIn("`fork_turns=none`", output["reason"])
 
     def test_missing_review_block_explains_wait_state_and_write_boundary(self) -> None:
         self.assertIn("Status: WAITING_FOR_REVIEW", gate.BLOCK_REASON)

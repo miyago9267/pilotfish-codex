@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import shutil
 import subprocess
@@ -123,6 +124,35 @@ class PromptDocumentLockTests(unittest.TestCase):
 
             with self.assertRaisesRegex(PromptLockError, "LOCK.json changed"):
                 validate_lock(root, base_ref="HEAD")
+
+    def test_new_surface_requires_explicit_lock_renewal(self) -> None:
+        with self._git_repo_with_current_lock() as root:
+            manifest = root / "docs" / "specs" / "prompt-document-lock" / "LOCK.json"
+            lock = json.loads(manifest.read_text(encoding="utf-8"))
+            lock["surfaces"] = [
+                surface
+                for surface in lock["surfaces"]
+                if surface["path"] != "templates/agents/sol-executor.toml"
+            ]
+            manifest.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8")
+            (root / "templates" / "agents" / "sol-executor.toml").unlink()
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "test: establish previous lock"], cwd=root, check=True)
+
+            current_manifest = ROOT / "docs" / "specs" / "prompt-document-lock" / "LOCK.json"
+            shutil.copyfile(current_manifest, manifest)
+            shutil.copyfile(
+                ROOT / "templates" / "agents" / "sol-executor.toml",
+                root / "templates" / "agents" / "sol-executor.toml",
+            )
+
+            with self.assertRaisesRegex(PromptLockError, "LOCK.json changed"):
+                validate_lock(root, base_ref="HEAD")
+            report = validate_lock(root, base_ref="HEAD", allow_lock_update=True)
+            added = next(
+                item for item in report["surfaces"] if item["id"] == "sol-executor-agent"
+            )
+            self.assertTrue(added["added"])
 
     def test_mirrored_policy_drift_is_rejected(self) -> None:
         with self._git_repo_with_current_lock() as root:

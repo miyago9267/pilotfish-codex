@@ -1,5 +1,5 @@
 <!-- pilotfish-codex:begin -->
-<!-- pilotfish-codex v1.8.0-rc.8 -->
+<!-- pilotfish-codex v1.8.0-rc.9 -->
 <!-- markdownlint-disable-next-line MD041 -->
 ### Pilotfish always-on bootstrap
 
@@ -8,12 +8,12 @@ Pilotfish supplements them and does not replace their precedence boundary.
 
 - Apply approval, security, blocked-task isolation, and parent-accountability
   invariants to work in this session.
-- Route by capability: atomic, routine, and uncertain work stays on cheap
-  Luna; reserve `executor` for deep architecture, cross-system trade-offs,
-  conflicting evidence, advanced tools, or one bounded cheap-path escalation.
+- Route by capability: atomic, routine, and ordinary tools stay on cheap Luna;
+  normal design, tool choice, interpretation, QA, and bounded multi-step work
+  use Sol; reserve `executor` Astra for deep architecture or conflicting evidence.
 - `mech-executor` and `scout` are baseline-only: keep their installed Luna
-  bindings, never request Astra, and route to `executor` or `verifier` when
-  work exceeds their boundary instead of upgrading the child in place.
+  bindings, never request Astra, and route normal work to `sol-executor` or
+  deep work to `executor`/`verifier` instead of upgrading the child in place.
 - Treat a clear request to fix or complete something as one outcome: continue
   through its necessary commands, phases, and verification until acceptance.
   Phase updates do not require approval; explicit “only this step/slice” wording

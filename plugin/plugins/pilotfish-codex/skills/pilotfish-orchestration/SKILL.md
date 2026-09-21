@@ -25,11 +25,10 @@ Keep the task boundary as `goal -> in-scope -> stop condition`. Do not expand
 into adjacent cleanup unless correctness or safety requires it.
 
 Before the first tool action, route one-command/one-action work to the cheap
-parent or `mech-executor`. Route design, tool choice, output interpretation,
-multi-step work, and uncertainty automatically to the installed strong
-`executor` role; do not wait for the user to request delegation. An unexpected
-cheap result escalates once to `executor` and then stops if the role is
-unavailable.
+parent or `mech-executor`. Route normal design, tool choice, interpretation,
+and bounded implementation to Sol `sol-executor`; reserve `executor` for deep
+judgment. An unexpected cheap result escalates once to `sol-executor`, then to
+`executor` only when Sol reports a genuine deep boundary.
 
 ## Role routing
 
@@ -38,10 +37,12 @@ work:
 
 - `scout`: read-only repository reconnaissance on an exclusive surface.
 - `plan-verifier`: challenge a material Plan before approval.
+- `sol-executor`: bounded implementation using normal engineering judgment.
 - `executor`: bounded implementation requiring local judgment.
 - `mech-executor`: fully specified mechanical repetition with exclusive ownership.
 - `mech-executor` and `scout` are baseline-only Luna roles; never pass an Astra
-  override. Route work beyond either boundary to `executor` or `verifier`.
+  override. Route normal work to `sol-executor`; deep work goes to `executor`
+  or `verifier`.
 - `security-reviewer`: pre-approval security evidence.
 - `security-executor`: approved security-sensitive implementation.
 - `verifier`: fresh-context falsification after primary acceptance.

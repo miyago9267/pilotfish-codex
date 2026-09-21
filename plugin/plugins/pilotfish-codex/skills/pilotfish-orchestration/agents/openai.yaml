@@ -3,7 +3,8 @@ interface:
   short_description: "Route tasks with Pilotfish"
   default_prompt: >-
     Use Pilotfish orchestration for this task. Route atomic work to cheap Luna;
-    auto-route judgment to executor; if user explicitly started an Astra main session, then use the astra-thinking
+    normal judgment to Sol `sol-executor`, deep judgment to Astra `executor`,
+    and if user explicitly started an Astra main session, use the astra-thinking
     contract: named inputs, one sufficient pass, advisory max_tool_calls=12 and
     max_wall_seconds=300 limits, Luna delegation for mechanical work,
     plan-verifier on Sol, and unchanged approval gates.

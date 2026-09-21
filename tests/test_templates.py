@@ -39,6 +39,8 @@ class NativeTemplateTests(unittest.TestCase):
             verifier = tomllib.load(handle)
         with (agents / "security-executor.toml").open("rb") as handle:
             security_executor = tomllib.load(handle)
+        with (agents / "sol-executor.toml").open("rb") as handle:
+            sol_executor = tomllib.load(handle)
         with (agents / "executor.toml").open("rb") as handle:
             executor = tomllib.load(handle)
         self.assertEqual(
@@ -47,7 +49,7 @@ class NativeTemplateTests(unittest.TestCase):
         )
         self.assertEqual(
             (verifier["model"], verifier["model_reasoning_effort"]),
-            ("gpt-6-astra", "high"),
+            ("gpt-5.6-sol", "high"),
         )
         self.assertEqual(
             (security_executor["model"], security_executor["model_reasoning_effort"]),
@@ -56,6 +58,10 @@ class NativeTemplateTests(unittest.TestCase):
         self.assertEqual(
             (executor["model"], executor["model_reasoning_effort"]),
             ("gpt-6-astra", "high"),
+        )
+        self.assertEqual(
+            (sol_executor["model"], sol_executor["model_reasoning_effort"]),
+            ("gpt-5.6-sol", "high"),
         )
         for path in agents.glob("*.toml"):
             with path.open("rb") as handle:
@@ -97,7 +103,7 @@ class NativeTemplateTests(unittest.TestCase):
         self.assertIn("classify each bounded workstream", policy)
         self.assertIn("delegate it to the least expensive", policy)
         self.assertIn("two or more reconnaissance surfaces are independent", policy)
-        self.assertIn("bounded implementation requiring judgment to `executor`", policy)
+        self.assertIn("bounded implementation requiring judgment to `sol-executor`", policy)
         self.assertIn("approved security-sensitive implementation to `security-executor`", policy)
         self.assertIn("After a risk-triggered implementation", policy)
         self.assertIn("dispatch exactly one `mech-executor`", policy)

@@ -37,7 +37,7 @@ class PolicyTests(unittest.TestCase):
             "material Plan to `plan-verifier` before approval",
             "pre-approval security evidence to `security-reviewer`",
             "fully specified mechanical repetition to `mech-executor`",
-            "approved, bounded implementation requiring judgment to `executor`",
+            "approved, bounded implementation requiring judgment to `sol-executor`",
             "risk-triggered implementation",
             "fresh `verifier` for one independent refutation pass",
         ):
@@ -49,9 +49,9 @@ class PolicyTests(unittest.TestCase):
         )
         for phrase in (
             "Atomic one-command/one-action work",
-            "Routine design, ordinary tools, bounded multi-step, or uncertainty",
-            "`executor`/`verifier` at Astra `high`, selectively",
-            "only for deep architecture",
+            "Normal design, tool choice, interpretation, QA, or bounded implementation",
+            "`sol-executor` / `verifier` Sol binding",
+            "Use Astra only at the rare deep tier",
             "Automatic typed escalation never switches the root model",
             "main session should not wait for the user to name a subagent",
         ):
@@ -62,8 +62,8 @@ class PolicyTests(unittest.TestCase):
             (ROOT / "templates" / "agents-md.bootstrap.md").read_text(encoding="utf-8").split()
         )
         for phrase in (
-            "Route by capability: atomic, routine, and uncertain work stays on cheap Luna",
-            "reserve `executor` for deep architecture",
+            "Route by capability: atomic, routine, and ordinary tools stay on cheap Luna",
+            "use Sol; reserve `executor` Astra for deep architecture",
             "proactively dispatch the least expensive matching native typed role",
         ):
             self.assertIn(phrase, bootstrap)
@@ -87,7 +87,10 @@ class PolicyTests(unittest.TestCase):
         )
         self.assertIn("`mech-executor` and `scout` are baseline-only", policy)
         self.assertIn("never request Astra", policy)
-        self.assertIn("route to `executor` or `verifier`", policy)
+        self.assertIn(
+            "route normal work to `sol-executor`; deep work to `executor`/`verifier`",
+            policy,
+        )
 
     def test_policy_defines_general_mode_decision_checkpoint_contract(self) -> None:
         policy = " ".join(

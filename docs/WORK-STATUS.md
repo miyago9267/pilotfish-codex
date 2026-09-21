@@ -13,28 +13,28 @@ owner: Miyago
 ## Current objective
 
 建立 automatic model routing：一個 command／一個 action 留在 cheap Luna path，
-需要設計、工具、解讀、多步驟或不確定性時自動開 strong typed role，並保留防止
-tunnel vision 的固定工作包與一次性升級邊界。
+普通工具、機械式多步驟與不確定性留在 cheap Luna；一般設計、工具選擇、解讀、
+QA 與 bounded implementation 使用 Sol；只有深層架構或衝突證據才自動開 Astra
+typed role，並保留防止 tunnel vision 的固定工作包與一次性升級邊界。
 
-## Current release candidate — v1.8.0-rc.8
+## Current release candidate — v1.8.0-rc.9
 
 - [x] Automatic model routing spec and route-marker implementation are implemented.
-- [x] `UserPromptSubmit` now emits a redacted `atomic`/`guarded`/`judgment`
-  route signal with trigger, purpose, escalation conditions, and typed dispatch
-  fields; Astra is reserved for high-confidence deep judgment.
-- [x] Stop hook retries a missing typed `executor` route once, pins
+- [x] `UserPromptSubmit` now emits a redacted `atomic`/`guarded`/`judgment`/
+  `deep_judgment` route signal; normal judgment uses Sol `sol-executor`, while
+  Astra is reserved for high-confidence deep judgment.
+- [x] Stop hook retries a missing typed route once, pins
   `fork_turns=none`, and does not re-lock an already continued turn.
-- [x] `executor` and `verifier` templates now bind to `gpt-6-astra@high`;
-  `mech-executor` and `scout` remain cheap Luna roles.
+- [x] `sol-executor`, `verifier`, and the existing Sol review roles bind to
+  `gpt-5.6-sol@high`; only deep `executor` remains `gpt-6-astra@high`.
 - [x] Prompt-lock and full test pass; effective Orca home roles and full
   `~/.codex` installer dry-run are verified.
-- [x] Full global hook/Plugin install is complete; the installer state is
-  committed as v4 with Plugin `1.8.0-rc.8`.
+- [ ] Full global hook/Plugin install for rc.9 is pending local verification.
 - [ ] Live automatic task-class selection remains unverified; static route and
   typed-dispatch evidence cannot prove every natural-language turn.
 
 - [x] `VERSION`, Plugin manifest, installer constant, and policy markers are
-  synchronized to `1.8.0-rc.7`.
+  synchronized to `1.8.0-rc.9`.
 
 ### Inherited rc.5 evidence
 

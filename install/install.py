@@ -104,7 +104,7 @@ class PolicyTargetIdentity:
 
 MIN_COMPATIBLE_CODEX_VERSION = (0, 147, 0)
 PILOTFISH_PLUGIN_NAME = "pilotfish-codex"
-PILOTFISH_PLUGIN_VERSION = "1.8.0-rc.8"
+PILOTFISH_PLUGIN_VERSION = "1.8.0-rc.9"
 RUNTIME_STATUSES = frozenset({"integrated", "integrated-plugin-unavailable"})
 RECONCILIATION_STATE_VERSION = 4
 
@@ -947,7 +947,15 @@ def _validate_committed_state(
         if is_v2
         else _required_state_targets(policy_path, home)
     )
-    if recorded != required or set(originals) != recorded:
+    newly_managed_role_targets = {
+        f"agents/{role}.toml" for role in ROLES
+    }
+    missing_targets = required - recorded
+    if (
+        recorded - required
+        or set(originals) != recorded
+        or not missing_targets <= newly_managed_role_targets
+    ):
         raise InstallAbort("install state target manifest is stale or incomplete")
     try:
         if is_v2:

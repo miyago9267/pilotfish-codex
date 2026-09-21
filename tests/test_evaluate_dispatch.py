@@ -59,6 +59,7 @@ class DispatchEvaluationTests(unittest.TestCase):
                 "plan-verifier",
                 "security-reviewer",
                 "mech-executor",
+                "sol-executor",
                 "executor",
                 "verifier",
                 "security-executor",
@@ -82,8 +83,8 @@ class DispatchEvaluationTests(unittest.TestCase):
         report = evaluate(self.corpus, self._perfect_decisions())
 
         self.assertTrue(report["passed"])
-        self.assertEqual(report["coverage"], {"expected": 9, "submitted": 9, "complete": True})
-        self.assertEqual(report["role_selection"], {"correct": 7, "total": 7, "accuracy": 1.0})
+        self.assertEqual(report["coverage"], {"expected": 10, "submitted": 10, "complete": True})
+        self.assertEqual(report["role_selection"], {"correct": 8, "total": 8, "accuracy": 1.0})
         self.assertEqual(report["abstention"], {"correct": 2, "total": 2, "accuracy": 1.0})
         self.assertEqual(report["invalid_decisions"]["total"], 0)
 
@@ -130,7 +131,7 @@ class DispatchEvaluationTests(unittest.TestCase):
         report = evaluate(self.corpus, decisions, min_role_accuracy=1.0)
 
         self.assertFalse(report["passed"])
-        self.assertEqual(report["role_selection"]["correct"], 6)
+        self.assertEqual(report["role_selection"]["correct"], 7)
         self.assertEqual(report["abstention"]["accuracy"], 1.0)
 
     def test_wrong_abstention_fails_abstention_threshold(self) -> None:

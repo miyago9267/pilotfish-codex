@@ -43,6 +43,15 @@
       "prompt": "Implement the approved bounded API feature with its done criteria, making the necessary local engineering choices.",
       "policy_basis": [
         "templates/agents-md.orchestration.md",
+        "templates/agents/sol-executor.toml"
+      ],
+      "expected": {"decision": "delegate", "role": "sol-executor"}
+    },
+    {
+      "id": "deep-architecture-implementation",
+      "prompt": "Redesign the cross-system migration architecture, resolve conflicting evidence, and implement the approved trade-off.",
+      "policy_basis": [
+        "templates/agents-md.orchestration.md",
         "templates/agents/executor.toml"
       ],
       "expected": {"decision": "delegate", "role": "executor"}

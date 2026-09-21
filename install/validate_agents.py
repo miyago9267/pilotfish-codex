@@ -12,7 +12,7 @@ import tomllib
 from pathlib import Path
 
 ROLES = frozenset({
-    "executor", "mech-executor", "plan-verifier", "scout",
+    "executor", "mech-executor", "plan-verifier", "scout", "sol-executor",
     "security-executor", "security-reviewer", "verifier",
 })
 ALLOWED_KEYS = {

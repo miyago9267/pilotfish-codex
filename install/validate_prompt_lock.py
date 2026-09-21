@@ -26,6 +26,7 @@ REQUIRED_SURFACE_PATHS = frozenset(
         "templates/agents/mech-executor.toml",
         "templates/agents/plan-verifier.toml",
         "templates/agents/scout.toml",
+        "templates/agents/sol-executor.toml",
         "templates/agents/security-executor.toml",
         "templates/agents/security-reviewer.toml",
         "templates/agents/verifier.toml",
@@ -316,7 +317,25 @@ def validate_lock(
     reports: list[dict[str, Any]] = []
     for surface in lock["surfaces"]:
         relative_path = surface["path"]
-        before = _git_show(root, base_ref, relative_path) or ""
+        before = _git_show(root, base_ref, relative_path)
+        if before is None:
+            if not allow_lock_update:
+                raise PromptLockError(
+                    f"{surface['id']}: new protected surface requires --allow-lock-update"
+                )
+            reports.append(
+                {
+                    "id": surface["id"],
+                    "path": relative_path,
+                    "added": True,
+                    "changed_lines": 0,
+                    "added_lines": 0,
+                    "removed_lines": 0,
+                    "changed_characters": 0,
+                    "change_ratio": 0.0,
+                }
+            )
+            continue
         metrics = check_change_budget(surface, before, contents[relative_path])
         reports.append({"id": surface["id"], "path": relative_path, **metrics})
     if any(report["changed_characters"] for report in reports):

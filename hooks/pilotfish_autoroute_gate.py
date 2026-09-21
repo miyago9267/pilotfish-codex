@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Route cheap work conservatively and reserve strong escalation for deep judgment."""
+"""Route work through Luna, Sol, and rare Astra judgment tiers."""
 
 from __future__ import annotations
 
@@ -17,8 +17,15 @@ from typing import Any
 
 SCHEMA = 2
 REQUIRED_TASK = "automatic_plan_review"
-ROUTE_SCHEMA = 3
+ROUTE_SCHEMA = 4
 ROUTE_REQUIRED_TASK = "automatic_model_route"
+SOL_EXECUTOR_ROLE = "sol-executor"
+ASTRA_EXECUTOR_ROLE = "executor"
+AUTOMATIC_ROUTE_ROLES = frozenset({SOL_EXECUTOR_ROLE, ASTRA_EXECUTOR_ROLE})
+AUTOMATIC_ROUTE_BY_ROLE = {
+    SOL_EXECUTOR_ROLE: "judgment",
+    ASTRA_EXECUTOR_ROLE: "deep_judgment",
+}
 ROUTE_ESCALATION_EVENTS = (
     "unexpected_result",
     "error",
@@ -51,20 +58,26 @@ BLOCK_REASON = (
     "or ask the user solely because this review is pending."
 )
 BLOCK_OUTPUT = {"decision": "block", "reason": BLOCK_REASON}
-MODEL_ROUTE_OUTPUT = {
-    "decision": "block",
-    "reason": (
-        "Status: ROUTE_ESCALATION_REQUIRED. This turn needs design, tool use, "
-        "interpretation, or multiple steps. The hook has opened one bounded "
-        "continuation. On this continuation, immediately call exactly one "
-        "native typed `spawn_agent` with `agent_type=executor`, "
-        "`task_name=automatic_model_route`, and `fork_turns=none`; use a "
-        "bounded message that preserves the existing goal, target, acceptance, "
-        "and stop condition. Do not use a full-history fork, pass model or "
-        "reasoning overrides, ask the user to request a role, or choose the "
-        "next phase."
-    ),
-}
+def _model_route_output(required_role: str) -> dict[str, str]:
+    """Return one bounded continuation directive for a typed route role."""
+    return {
+        "decision": "block",
+        "reason": (
+            "Status: ROUTE_ESCALATION_REQUIRED. This turn needs design, tool use, "
+            "interpretation, or multiple steps. The hook has opened one bounded "
+            "continuation. On this continuation, immediately call exactly one "
+            "native typed `spawn_agent` with "
+            f"`agent_type={required_role}`, "
+            "`task_name=automatic_model_route`, and `fork_turns=none`; use a "
+            "bounded message that preserves the existing goal, target, acceptance, "
+            "and stop condition. Do not use a full-history fork, pass model or "
+            "reasoning overrides, ask the user to request a role, or choose the "
+            "next phase."
+        ),
+    }
+
+
+MODEL_ROUTE_OUTPUT = _model_route_output(ASTRA_EXECUTOR_ROLE)
 
 _PLAN_RE = re.compile(
     r"(?:\b(?:plan|planning|pre-approval|approval|approve|readiness|proposal)\b|"
@@ -183,14 +196,16 @@ _DEEP_JUDGMENT_HINTS = re.compile(
     r"架構|架构|重新設計|重新设计|跨系統|跨系统|跨服務|跨服务|多系統|多系统|"
     r"權衡|权衡|取捨|取舍|衝突證據|冲突证据|根因分析|遷移策略|迁移策略|"
     r"高級工具|高级工具|高階工具|高阶工具|進階工具|进阶工具|工具編排|工具编排|"
-    r"工具鏈|工具链|深度推理|深入推理|深度分析|深入分析|通靈|"
-    r"ROUTE_ESCALATION_REQUIRED|automatic_model_route",
+    r"工具鏈|工具链|深度推理|深入推理|深度分析|深入分析|通靈",
     re.IGNORECASE,
 )
 _JUDGMENT_HINTS = re.compile(
     r"設計|设计|規劃|规划|實作|实现|修復|修复|診斷|诊断|分析|比較|比较|"
     r"選擇|选择|解讀|解读|原因|為什麼|为什么|how|why|design|plan|diagnos|"
-    r"debug|architect|tool|工具|流程|方案|策略|多步|跨檔|跨文件|跨系統|跨系统",
+    r"debug|architect|tool\s+(?:choice|selection|output)|"
+    r"選擇工具|工具選擇|解讀工具輸出|解读工具输出|流程|方案|策略|多步|"
+    r"跨檔|跨文件|跨系統|跨系统|\bqa\b|quality\s+assurance|"
+    r"驗收|验收|品質(?:檢查|检查|驗證|验证)|测试策略|測試策略|测试规划|測試規劃",
     re.IGNORECASE,
 )
 
@@ -235,7 +250,7 @@ def classify_review_intent(prompt: object) -> str | None:
 
 
 def classify_execution_route(prompt: object) -> str:
-    """Choose atomic, guarded-cheap, or deep-judgment without retaining prompt text."""
+    """Choose a control route whose model tier is Luna, Sol, or Astra."""
     if not isinstance(prompt, str) or len(prompt) > MAX_PROMPT_CHARS:
         return "guarded"
     text = prompt.strip()
@@ -247,6 +262,8 @@ def classify_execution_route(prompt: object) -> str:
     ):
         return "atomic"
     if _DEEP_JUDGMENT_HINTS.search(text) is not None:
+        return "deep_judgment"
+    if _JUDGMENT_HINTS.search(text) is not None:
         return "judgment"
     return "guarded"
 
@@ -255,7 +272,7 @@ def execution_route_reason(prompt: object, route: str) -> str:
     """Return a stable redacted reason for the selected route."""
     if route == "atomic":
         return "single_action"
-    if route == "judgment":
+    if route == "deep_judgment":
         return "deep_judgment"
     if not isinstance(prompt, str):
         return "uncertain_but_bounded"
@@ -268,10 +285,15 @@ def execution_route_reason(prompt: object, route: str) -> str:
     return "uncertain_but_bounded"
 
 
-def _route_signal(payload: dict[str, Any], prompt: object) -> dict[str, Any]:
-    route = classify_execution_route(prompt)
+def _route_signal(
+    payload: dict[str, Any],
+    prompt: object,
+    *,
+    route_override: str | None = None,
+) -> dict[str, Any]:
+    route = route_override or classify_execution_route(prompt)
     categories = classify_prompt(prompt)
-    security_route = route == "judgment" and "security" in categories
+    security_route = route in {"judgment", "deep_judgment"} and "security" in categories
     if security_route:
         required_role = "security-reviewer"
         model_policy = "specialized"
@@ -288,13 +310,25 @@ def _route_signal(payload: dict[str, Any], prompt: object) -> dict[str, Any]:
         )
         dispatch = {"mode": "parent_local"}
         escalate_on = list(ROUTE_ESCALATION_EVENTS)
-    else:
-        required_role = "executor"
-        model_policy = "strong"
-        model_snapshot = "gpt-6-astra@high"
+    elif route == "judgment":
+        required_role = SOL_EXECUTOR_ROLE
+        model_policy = "capable"
+        model_snapshot = "gpt-5.6-sol@high"
         purpose = "bounded_judgment_execution"
         dispatch = {
-            "agent_type": "executor",
+            "agent_type": SOL_EXECUTOR_ROLE,
+            "fork_turns": "none",
+            "mode": "typed_role",
+            "task_name": ROUTE_REQUIRED_TASK,
+        }
+        escalate_on = list(ROUTE_ESCALATION_EVENTS)
+    else:
+        required_role = ASTRA_EXECUTOR_ROLE
+        model_policy = "strong"
+        model_snapshot = "gpt-6-astra@high"
+        purpose = "bounded_deep_judgment_execution"
+        dispatch = {
+            "agent_type": ASTRA_EXECUTOR_ROLE,
             "fork_turns": "none",
             "mode": "typed_role",
             "task_name": ROUTE_REQUIRED_TASK,
@@ -372,8 +406,9 @@ def _combined_prompt_output(
     prompt: object,
     intent: str | None,
     categories: tuple[str, ...],
+    route_signal: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    route_signal = _route_signal(payload, prompt)
+    route_signal = route_signal or _route_signal(payload, prompt)
     contexts = [
         "Pilotfish automatic model route: "
         + json.dumps(route_signal, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -610,14 +645,31 @@ def _load_route_marker(codex_home: Path, session_id: str) -> dict[str, Any] | No
         or marker.get("session_id") != session_id
         or not _valid_identifier(marker.get("turn_id"))
         or marker.get("required_task") != ROUTE_REQUIRED_TASK
-        or marker.get("required_role") != "executor"
-        or marker.get("route") != "judgment"
+        or marker.get("required_role") not in AUTOMATIC_ROUTE_ROLES
+        or marker.get("route") != AUTOMATIC_ROUTE_BY_ROLE.get(marker.get("required_role"))
         or not isinstance(marker.get("attempted"), bool)
         or not isinstance(marker.get("route_fingerprint"), str)
         or not re.fullmatch(r"[0-9a-f]{64}", marker["route_fingerprint"])
     ):
         return None
     return marker
+
+
+def _is_route_continuation(prompt: object) -> bool:
+    """Recognize only the hook's own continuation directive without its marker."""
+    return (
+        isinstance(prompt, str)
+        and "Status: ROUTE_ESCALATION_REQUIRED." in prompt
+        and "automatic_model_route" in prompt
+    )
+
+
+def _route_signal_for_marker(
+    payload: dict[str, Any],
+    marker: dict[str, Any],
+) -> dict[str, Any]:
+    """Re-emit the pending typed role instead of upgrading a Sol retry to Astra."""
+    return _route_signal(payload, "", route_override=marker["route"])
 
 
 def _stat_fingerprint(value: os.stat_result) -> tuple[int, ...]:
@@ -1275,7 +1327,11 @@ def _handle_prompt(payload: dict[str, Any], codex_home: Path) -> dict[str, Any] 
     if not _valid_identifier(turn_id):
         _remove_marker(codex_home, session_id)
         return None
-    route_signal = _route_signal(payload, prompt)
+    pending_route_marker = _load_route_marker(codex_home, session_id)
+    if _is_route_continuation(prompt) and pending_route_marker is not None:
+        route_signal = _route_signal_for_marker(payload, pending_route_marker)
+    else:
+        route_signal = _route_signal(payload, prompt)
     if requires_sol_review(categories):
         fingerprint = _blocker_fingerprint(prompt, categories)
         previous = _load_marker(codex_home, session_id)
@@ -1300,7 +1356,7 @@ def _handle_prompt(payload: dict[str, Any], codex_home: Path) -> dict[str, Any] 
             _remove_marker(codex_home, session_id)
         else:
             _remove_route_marker(codex_home, session_id)
-    elif route_signal["required_role"] == "executor":
+    elif route_signal["required_role"] in AUTOMATIC_ROUTE_ROLES:
         _remove_review_marker(codex_home, session_id)
         fingerprint = _blocker_fingerprint(
             prompt,
@@ -1320,8 +1376,8 @@ def _handle_prompt(payload: dict[str, Any], codex_home: Path) -> dict[str, Any] 
                 "session_id": session_id,
                 "turn_id": turn_id,
                 "required_task": ROUTE_REQUIRED_TASK,
-                "required_role": "executor",
-                "route": "judgment",
+                "required_role": route_signal["required_role"],
+                "route": route_signal["route"],
                 "attempted": False,
                 "route_fingerprint": fingerprint,
             }
@@ -1329,7 +1385,7 @@ def _handle_prompt(payload: dict[str, Any], codex_home: Path) -> dict[str, Any] 
             _remove_route_marker(codex_home, session_id)
     else:
         _remove_marker(codex_home, session_id)
-    return _combined_prompt_output(payload, prompt, intent, categories)
+    return _combined_prompt_output(payload, prompt, intent, categories, route_signal)
 
 
 def _handle_stop(payload: dict[str, Any], codex_home: Path) -> dict[str, str] | None:
@@ -1358,7 +1414,7 @@ def _handle_stop(payload: dict[str, Any], codex_home: Path) -> dict[str, str] | 
             events,
             session_id=session_id,
             turn_id=turn_id,
-            required_role="executor",
+            required_role=route_marker["required_role"],
             required_task=ROUTE_REQUIRED_TASK,
         )
         if direct_chain_valid and allowed_child_id is not None:
@@ -1370,7 +1426,7 @@ def _handle_stop(payload: dict[str, Any], codex_home: Path) -> dict[str, str] | 
         if not _atomic_route_marker_write(codex_home, active_marker):
             _remove_route_marker(codex_home, session_id)
             return None
-        return dict(MODEL_ROUTE_OUTPUT)
+        return _model_route_output(route_marker["required_role"])
     direct_chain_valid, allowed_child_id = _direct_child_filter(
         events,
         session_id=session_id,

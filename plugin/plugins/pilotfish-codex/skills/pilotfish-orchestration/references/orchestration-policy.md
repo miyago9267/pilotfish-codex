@@ -1,12 +1,12 @@
 <!-- pilotfish-codex:begin -->
-<!-- pilotfish-codex v1.8.0-rc.8 -->
+<!-- pilotfish-codex v1.8.0-rc.9 -->
 <!-- markdownlint-disable-next-line MD041 -->
 ### Orchestration
 
 Main-session policy. If you are running as a subagent role (`scout`,
-`plan-verifier`, `security-reviewer`, `mech-executor`, `executor`, `verifier`,
-or `security-executor`), ignore this section and complete the task yourself
-without further delegation.
+`plan-verifier`, `security-reviewer`, `mech-executor`, `sol-executor`,
+`executor`, `verifier`, or `security-executor`), ignore this section and
+complete the task yourself without further delegation.
 
 Use the supplied role agents for bounded discovery, execution, and fresh-context
 verification while keeping task framing, Plan synthesis, architecture,
@@ -19,6 +19,7 @@ Complete small, local, already-stable work directly.
 | `plan-verifier` | Pre-approval Plan challenge; `READY` or `REVISE` |
 | `security-reviewer` | Pre-approval read-only security evidence |
 | `mech-executor` | Fully specified mechanical implementation |
+| `sol-executor` | Bounded implementation using normal engineering judgment |
 | `executor` | Bounded implementation requiring local judgment |
 | `verifier` | Calibrated completed-work falsification; `CONFIRMED`, `REFUTED`, or `INCONCLUSIVE` |
 | `security-executor` | Approved security-sensitive implementation |
@@ -36,7 +37,8 @@ projection never bypasses typed dispatch or host approval.
 | Pure Plan or semantic judgment | Sol where the existing contract requires it | Do not replace `plan-verifier` |
 | Security review with cross-file or cross-system evidence | Current reviewer binding | `security-reviewer` at Astra `high`, read-only |
 | Routine design, ordinary tools, bounded multi-step, or uncertainty | Parent or `mech-executor` Luna binding | Keep on the cheap guarded path |
-| Deep architecture, cross-system trade-offs, conflicting evidence, or advanced tool orchestration | Current role binding | `executor`/`verifier` at Astra `high`, selectively |
+| Normal design, tool choice, interpretation, QA, or bounded implementation | `sol-executor` / `verifier` Sol binding | Use Sol as the capable middle tier |
+| Deep architecture, cross-system trade-offs, conflicting evidence, or advanced tool orchestration | `executor` Astra binding | Use Astra only at the rare deep tier |
 | Fingerprinted disagreement between two verdicts | Existing adjudication path | One Astra `high` adjudication, then stop |
 
 #### Explicit Astra main-session mode
@@ -59,13 +61,14 @@ sufficient pass, minimal research, and a stop at acceptance evidence. Treat
 provider-enforced quota. The one-child cap is the only native concurrency
 guard in this mode.
 
-Use installed `executor`/`verifier` Astra bindings only for deep architecture,
-cross-system trade-offs, conflicting evidence, advanced tool orchestration, or
-one bounded cheap-path escalation. Keep atomic, routine, and guarded work on
-Luna roles. `mech-executor` and `scout` remain baseline-only, and
-`plan-verifier` remains `gpt-5.6-sol@high`; required approval, security,
-release, and fresh-verifier gates remain unchanged. Automatic typed escalation
-never switches the root model in place because a task is difficult.
+Use `sol-executor` and `verifier` Sol bindings for normal design, tool choice,
+interpretation, QA, and bounded implementation. Use the installed `executor`
+Astra binding only for deep architecture, cross-system trade-offs, conflicting
+evidence, advanced tool orchestration, or one bounded Sol-path escalation.
+Keep atomic, routine, and guarded work on Luna roles. `mech-executor` and
+`scout` remain baseline-only, and `plan-verifier` remains `gpt-5.6-sol@high`;
+required approval, security, release, and fresh-verifier gates remain
+unchanged. Automatic typed escalation never switches the root model in place.
 
 If Astra is unavailable or an override is invalid, fail closed before task
 work or an Astra dispatch receipt. Recovery requires a separately started
@@ -74,7 +77,7 @@ no-flags session, which returns to the normal Luna/Sol policy.
 `mech-executor` and `scout` are baseline-only roles. Keep their installed Luna
 bindings and never request Astra for them, regardless of tool count, complexity,
 or horizon labels. If the work exceeds a mechanical or reconnaissance boundary,
-route to `executor` or `verifier` instead of upgrading the child in place.
+  route normal work to `sol-executor`; deep work to `executor`/`verifier`.
 
 Before dispatch, record only the redacted routing context: `model_candidate`,
 `model_snapshot`, `complexity`, `escalation_reason`, `permission_profile`, and a
@@ -109,7 +112,8 @@ matching typed role. In particular:
   `security-reviewer`.
 - Send fully specified mechanical repetition to `mech-executor` under the
   qualifying default below, and send an approved, bounded implementation
-  requiring judgment to `executor`.
+  requiring judgment to `sol-executor` or `executor` when the deep boundary is
+  evidenced.
 - Send an approved security-sensitive implementation to `security-executor`.
 - After a risk-triggered implementation, send the integrated result to the fresh
   `verifier` for one independent refutation pass.

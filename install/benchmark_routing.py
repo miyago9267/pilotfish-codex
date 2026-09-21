@@ -41,6 +41,7 @@ ROLE_NAMES = (
     "mech-executor",
     "plan-verifier",
     "scout",
+    "sol-executor",
     "security-executor",
     "security-reviewer",
     "verifier",
@@ -56,10 +57,11 @@ PARENT_MODEL = "gpt-5.6-luna"
 PARENT_EFFORT = "medium"
 PARENT_PROMPT = (
     "Run this benchmark task exactly as written. First classify the work surface "
-    "as atomic one-command/one-action or judgment/tool-heavy. Keep atomic work "
-    "on the current low-cost path; automatically use the installed Astra "
-    "executor for design, tool choice, interpretation, multi-step work, or "
-    "uncertainty. You are "
+    "as atomic one-command/one-action, normal judgment, or deep judgment. Keep "
+    "atomic and routine work on the current low-cost path; use the installed Sol "
+    "sol-executor for normal design, tool choice, interpretation, QA, and bounded "
+    "implementation; use the installed Astra executor only for deep architecture "
+    "or conflicting evidence. You are "
     "bound to the smallest sufficient change: use only the named-input tool "
     "allowlist, stop at max_tool_calls=20 or max_wall_seconds=600, and stop "
     "once the acceptance evidence is sufficient. Report primary_flow, "
@@ -144,6 +146,10 @@ def _template_candidate(role: str) -> Candidate:
 
 
 ROLE_CANDIDATES: dict[str, tuple[Candidate, Candidate]] = {
+    "sol-executor": (
+        _template_candidate("sol-executor"),
+        _template_candidate("sol-executor"),
+    ),
     "security-reviewer": (
         _template_candidate("security-reviewer"),
         Candidate("gpt-6-astra", "high"),
@@ -198,6 +204,8 @@ def select_role_candidate(
     if role not in ROLE_CANDIDATES:
         raise BenchmarkError(f"role has no Astra candidate: {role}")
     baseline, astra = ROLE_CANDIDATES[role]
+    if role == "sol-executor":
+        return baseline, "sol-default"
     if role == "semantic-adjudicator":
         return (astra, "disagreement") if disagreement else (baseline, "baseline")
     tool_heavy = tool_actions > 0 or external_evidence

@@ -36,6 +36,7 @@ ALLOWED_ROLES = frozenset(
         "plan-verifier",
         "security-reviewer",
         "mech-executor",
+        "sol-executor",
         "executor",
         "verifier",
         "security-executor",

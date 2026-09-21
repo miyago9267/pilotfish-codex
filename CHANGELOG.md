@@ -7,6 +7,13 @@ are noted only as source references.
 
 ## Unreleased
 
+## v1.8.0-rc.9
+
+- Add Sol as the normal judgment and implementation tier through `sol-executor`
+  and the default `verifier` binding.
+- Keep Astra `executor` for deep architecture, conflicting evidence, advanced
+  tool orchestration, and one bounded Sol-path escalation.
+
 ## v1.8.0-rc.8
 
 - Reserve Astra automatic escalation for high-confidence deep architecture,

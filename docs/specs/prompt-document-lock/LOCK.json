@@ -14,8 +14,8 @@
       "path": "templates/agents-md.bootstrap.md",
       "max_lines": 48,
       "max_bytes": 3000,
-      "max_changed_lines": 8,
-      "max_changed_characters": 800,
+      "max_changed_lines": 12,
+      "max_changed_characters": 1000,
       "max_change_ratio": 0.2,
       "required_fragments": [
         "Treat a clear request to fix or complete something as one outcome",
@@ -29,8 +29,8 @@
       "path": "templates/agents-md.orchestration.md",
       "max_lines": 700,
       "max_bytes": 43000,
-      "max_changed_lines": 24,
-      "max_changed_characters": 2400,
+      "max_changed_lines": 32,
+      "max_changed_characters": 3000,
       "max_change_ratio": 0.1,
       "required_fragments": [
         "Outcome-level continuation",
@@ -45,8 +45,8 @@
       "path": "plugin/plugins/pilotfish-codex/skills/pilotfish-orchestration/references/orchestration-policy.md",
       "max_lines": 700,
       "max_bytes": 43000,
-      "max_changed_lines": 24,
-      "max_changed_characters": 2400,
+      "max_changed_lines": 32,
+      "max_changed_characters": 3000,
       "max_change_ratio": 0.1,
       "required_fragments": [
         "Outcome-level continuation",
@@ -61,7 +61,7 @@
       "path": "plugin/plugins/pilotfish-codex/skills/pilotfish-orchestration/SKILL.md",
       "max_lines": 100,
       "max_bytes": 4700,
-      "max_changed_lines": 12,
+      "max_changed_lines": 14,
       "max_changed_characters": 1200,
       "max_change_ratio": 0.2,
       "required_fragments": [
@@ -127,6 +127,21 @@
         "fully-specified tasks",
         "no scope expansion",
         "stop and report"
+      ]
+    },
+    {
+      "id": "sol-executor-agent",
+      "path": "templates/agents/sol-executor.toml",
+      "max_lines": 40,
+      "max_bytes": 3500,
+      "max_changed_lines": 12,
+      "max_changed_characters": 1600,
+      "max_change_ratio": 0.2,
+      "required_fragments": [
+        "cannot delegate",
+        "implement the simplest thing that fully works",
+        "verify by exercising the change",
+        "ESCALATE_TO_EXECUTOR"
       ]
     },
     {

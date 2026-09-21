@@ -425,7 +425,7 @@ class NativeInstallTests(unittest.TestCase):
             self.assertEqual(self.run_install(home), 0)
             config = tomllib.loads((home / "config.toml").read_text())
             self.assertEqual(config["agents"]["max_concurrent_threads_per_session"], 3)
-            self.assertEqual({p.stem for p in (home / "agents").glob("*.toml")}, {"executor", "mech-executor", "plan-verifier", "scout", "security-executor", "security-reviewer", "verifier"})
+            self.assertEqual({p.stem for p in (home / "agents").glob("*.toml")}, {"executor", "mech-executor", "plan-verifier", "scout", "sol-executor", "security-executor", "security-reviewer", "verifier"})
             state = home.with_name(f"{home.name}.pilotfish-install-state.json")
             recorded = json.loads(state.read_text())
             self.assertEqual(recorded["status"], "committed")
@@ -491,7 +491,7 @@ class NativeInstallTests(unittest.TestCase):
                 self.assertEqual(self.run_install(home), 0)
             self.assertEqual(
                 {p.stem for p in (home / "agents").glob("*.toml")},
-                {"executor", "mech-executor", "plan-verifier", "scout", "security-executor", "security-reviewer", "verifier"},
+                {"executor", "mech-executor", "plan-verifier", "scout", "sol-executor", "security-executor", "security-reviewer", "verifier"},
             )
 
     def test_windows_crlf_policy_preserves_original_bytes_for_commit(self) -> None:
