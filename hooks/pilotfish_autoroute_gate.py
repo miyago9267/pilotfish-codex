@@ -254,6 +254,10 @@ def classify_execution_route(prompt: object) -> str:
     if not isinstance(prompt, str) or len(prompt) > MAX_PROMPT_CHARS:
         return "guarded"
     text = prompt.strip()
+    if _is_route_continuation(text):
+        # The hook's own escalation message may be echoed back as user text.
+        # Without an active marker, it is protocol text, not a new task.
+        return "guarded"
     if (
         (_ATOMIC_COMMAND.fullmatch(text) or _ATOMIC_DIRECT_ACTION.fullmatch(text))
         and _ATOMIC_UNSAFE.search(text) is None

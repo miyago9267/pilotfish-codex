@@ -161,6 +161,7 @@ class AutorouteHookTests(unittest.TestCase):
         prompts = (
             "Astra可以少量出現，但不能隨便就冒出來啊不然會貴死",
             "請用工具檢查這個本地設定。",
+            "Luna Max和Luna Medium的速度會差很多嗎？",
         )
         for prompt in prompts:
             with self.subTest(prompt=prompt), tempfile.TemporaryDirectory() as directory:
@@ -175,35 +176,61 @@ class AutorouteHookTests(unittest.TestCase):
                 self.assertIn('"model_policy":"cheap"', context)
                 self.assertIn('"purpose":"cheap_guarded_probe"', context)
                 self.assertIn('"required_role":"none"', context)
+                self.assertNotIn("ROUTE_ESCALATION_REQUIRED", context)
                 self.assertNotIn("gpt-6-astra@high", context)
                 self.assertEqual(list((home / gate.MARKER_DIRECTORY).glob("*.json")), [])
 
     def test_judgment_route_automatically_requires_sol_executor(self) -> None:
+        prompts = (
+            "請設計這個 parser 的修復流程。",
+            "請為這個 parser 選擇適合的工具。",
+        )
+        for prompt in prompts:
+            with self.subTest(prompt=prompt), tempfile.TemporaryDirectory() as directory:
+                home = Path(directory) / "codex-home"
+                home.mkdir()
+
+                payload = gate.handle(prompt_input(prompt), codex_home=home)
+
+                self.assertIsInstance(payload, dict)
+                context = payload["hookSpecificOutput"]["additionalContext"]
+                self.assertIn('"route":"judgment"', context)
+                self.assertIn('"model_policy":"capable"', context)
+                self.assertIn('"required_role":"sol-executor"', context)
+                self.assertIn("gpt-5.6-sol@high", context)
+                self.assertNotIn("gpt-6-astra@high", context)
+                self.assertIn('"purpose":"bounded_judgment_execution"', context)
+                self.assertIn(
+                    '"dispatch":{"agent_type":"sol-executor","fork_turns":"none",'
+                    '"mode":"typed_role","task_name":"automatic_model_route"}',
+                    context,
+                )
+                marker = gate._route_marker_path(home, SESSION, create=False)
+                self.assertIsNotNone(marker)
+                self.assertEqual(
+                    json.loads(marker.read_text())["required_role"],
+                    "sol-executor",
+                )
+
+    def test_copied_route_directive_does_not_reopen_escalation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "codex-home"
             home.mkdir()
+            directive = gate._model_route_output("sol-executor")["reason"]
 
             payload = gate.handle(
-                prompt_input("請設計這個 parser 的修復流程。"),
+                prompt_input("我看到這段 hook 輸出：\n" + directive),
                 codex_home=home,
             )
 
             self.assertIsInstance(payload, dict)
             context = payload["hookSpecificOutput"]["additionalContext"]
-            self.assertIn('"route":"judgment"', context)
-            self.assertIn('"model_policy":"capable"', context)
-            self.assertIn('"required_role":"sol-executor"', context)
-            self.assertIn("gpt-5.6-sol@high", context)
+            self.assertIn('"route":"guarded"', context)
+            self.assertIn('"model_policy":"cheap"', context)
+            self.assertIn('"required_role":"none"', context)
+            self.assertNotIn("gpt-5.6-sol@high", context)
             self.assertNotIn("gpt-6-astra@high", context)
-            self.assertIn('"purpose":"bounded_judgment_execution"', context)
-            self.assertIn(
-                '"dispatch":{"agent_type":"sol-executor","fork_turns":"none",'
-                '"mode":"typed_role","task_name":"automatic_model_route"}',
-                context,
-            )
-            marker = gate._route_marker_path(home, SESSION, create=False)
-            self.assertIsNotNone(marker)
-            self.assertEqual(json.loads(marker.read_text())["required_role"], "sol-executor")
+            self.assertEqual(list((home / gate.MARKER_DIRECTORY).glob("*.json")), [])
 
     def test_qa_route_automatically_requires_sol_executor(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
