@@ -1,5 +1,5 @@
 <!-- pilotfish-codex:begin -->
-<!-- pilotfish-codex v1.8.0 -->
+<!-- pilotfish-codex v1.8.1 -->
 <!-- markdownlint-disable-next-line MD041 -->
 ### Orchestration
 
@@ -37,7 +37,7 @@ projection never bypasses typed dispatch or host approval.
 | Pure Plan or semantic judgment | Sol where the existing contract requires it | Do not replace `plan-verifier` |
 | Security review with cross-file or cross-system evidence | Current reviewer binding | `security-reviewer` at Astra `high`, read-only |
 | Routine design, ordinary tools, bounded multi-step, or uncertainty | Parent or `mech-executor` Luna binding | Keep on the cheap guarded path |
-| Normal design, tool choice, interpretation, QA, or bounded implementation | `sol-executor` / `verifier` Sol binding | Use Sol as the capable middle tier |
+| Normal design, tool choice, interpretation, QA, or bounded implementation | `sol-executor` / `verifier` GPT-6 Sol binding | Use GPT-6 Sol as the capable middle tier |
 | Deep architecture, cross-system trade-offs, conflicting evidence, or advanced tool orchestration | `executor` Astra binding | Use Astra only at the rare deep tier |
 | Fingerprinted disagreement between two verdicts | Existing adjudication path | One Astra `high` adjudication, then stop |
 
@@ -61,12 +61,12 @@ sufficient pass, minimal research, and a stop at acceptance evidence. Treat
 provider-enforced quota. The one-child cap is the only native concurrency
 guard in this mode.
 
-Use `sol-executor` and `verifier` Sol bindings for normal design, tool choice,
+Use `sol-executor` and `verifier` GPT-6 Sol bindings for normal design, tool choice,
 interpretation, QA, and bounded implementation. Use the installed `executor`
 Astra binding only for deep architecture, cross-system trade-offs, conflicting
 evidence, advanced tool orchestration, or one bounded Sol-path escalation.
 Keep atomic, routine, and guarded work on Luna roles. `mech-executor` and
-`scout` remain baseline-only, and `plan-verifier` remains `gpt-5.6-sol@high`;
+`scout` remain baseline-only, and `plan-verifier` uses `gpt-6-sol@high`;
 required approval, security, release, and fresh-verifier gates remain
 unchanged. Automatic typed escalation never switches the root model in place.
 
@@ -86,6 +86,13 @@ because Astra supports a long context. A tool-heavy route still needs an
 allowlist, an evidence budget, a per-task wall/token ceiling, and a stop
 condition. Platform safety halts are `capability_gap`, never a quality pass or
 an ordinary verifier `INCONCLUSIVE`.
+
+For low-risk, local, reversible work, use one targeted acceptance check in the
+main session and do not add an independent verifier. For risk-triggered work,
+run the primary acceptance flow and then exactly one fresh outcome-verifier
+pass at the smallest coherent boundary. Do not repeat an unchanged check or
+add another verifier unless the artifact or relevant evidence materially
+changes; preserve distinct approval, security, and release gates.
 
 Role results should expose the evidence boundary rather than hidden reasoning:
 report `primary_flow`, `claim_relevant_edges`, `external_evidence`,

@@ -1,6 +1,6 @@
 name = "mech-executor"
 description = "Mechanical implementation from a complete specification: patterned refactors, convention-following tests, documentation, bulk edits, and routine verification."
-model = "gpt-5.6-luna"
+model = "gpt-6-luna"
 model_reasoning_effort = "medium"
 
 developer_instructions = """

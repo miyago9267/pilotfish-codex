@@ -1,6 +1,6 @@
 name = "scout"
 description = "Read-only reconnaissance for broad codebase sweeps or focused lookup of files, symbols, usages, configuration values, and existing flows."
-model = "gpt-5.6-luna"
+model = "gpt-6-luna"
 model_reasoning_effort = "low"
 sandbox_mode = "read-only"
 

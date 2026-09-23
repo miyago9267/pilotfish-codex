@@ -1,6 +1,6 @@
 name = "sol-executor"
 description = "Bounded implementation requiring normal engineering judgment: routine features, bug fixes, integration, and ordinary tool-assisted changes."
-model = "gpt-5.6-sol"
+model = "gpt-6-sol"
 model_reasoning_effort = "high"
 
 developer_instructions = """

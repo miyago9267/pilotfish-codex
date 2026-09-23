@@ -43,7 +43,7 @@ Intent routing 決定互動形狀；原本 Pilotfish 的 role system 再把工�
 | `co_discover` | Root session + 有界的 `scout` → `execute` 或 `explore_then_plan` | 把想法整理成穩定的問題、目標、MVP 與 acceptance boundary。 |
 | Security-sensitive work | `security-reviewer` → approved Plan → `security-executor` → `verifier` | 將 security evidence 與 implementation 保持在不同 capability boundary。 |
 
-目前安裝的七個 role：
+目前安裝的八個 role：
 
 | Role | 職責 |
 | --- | --- |
@@ -51,6 +51,7 @@ Intent routing 決定互動形狀；原本 Pilotfish 的 role system 再把工�
 | `plan-verifier` | 在 approval 前挑戰 material Plan。 |
 | `executor` | 需要 engineering judgment 的有界實作。 |
 | `mech-executor` | 已完整規格化的 mechanical implementation。 |
+| `sol-executor` | 使用一般 engineering judgment 的有界實作。 |
 | `security-reviewer` | approval 前的 read-only security evidence。 |
 | `security-executor` | 已核准的 security-sensitive implementation。 |
 | `verifier` | 使用 fresh context 驗證 outcome 或 direction checkpoint。 |
@@ -70,10 +71,10 @@ artifact task 作為 native-rollout proxy：
 
 <img src="./assets/v6-median-wall-time-zh-TW.svg" alt="每個候選者的中位 wall time" width="720">
 
-因此，一個 command／一個 action 的 `mech-executor` 與 scout 工作使用 Luna；
-需要設計、工具、解讀與 QA 的 `executor`／`verifier` 自動使用 Astra，較窄的
-`plan-verifier` 與 security review 使用 Sol；Terra 不設 active tier。這是 routing decision，不是通用的
-intelligence ranking。完整 benchmark 與 bar charts 請看
+既有 v6 benchmark 早於 GPT-6 role binding，不代表 GPT-6 的品質或延遲比較結果。
+目前的 policy 讓 Luna 處理 atomic／mechanical 工作，Sol 處理一般判斷、設計與 QA，
+只有深層架構或衝突證據才使用 Astra。Root session 不會自動切換模型。這是 routing
+decision，不是通用的 intelligence ranking。歷史 benchmark 與 bar charts 請看
 [usage-routing benchmark](./benchmarks/usage-routing-v1/README.md)。
 
 ## Opt-in Astra 主工作階段
@@ -89,8 +90,9 @@ codex --model gpt-6-astra \
 ```
 
 `astra-thinking` 讓 Astra 負責 synthesis、planning 與難判斷；mechanical 和
-重複工作交給 Luna。`max_tool_calls=12` 與 `max_wall_seconds=300` 是 advisory
-限制，不是 provider quota；`plan-verifier` 維持 Sol/high，既有 approval 與
+重複工作交給 Luna；一般判斷與驗證使用 Sol，只有 deep boundary 才使用 Astra。
+`max_tool_calls=12` 與 `max_wall_seconds=300` 是 advisory
+限制，不是 provider quota；既有 approval 與
 security gates 不變。Astra 不可用或 override 無效時會在 task work 前
 fail-closed；移除 flags 後另開新 session 即回到正常 Luna/Sol policy。
 

@@ -20,7 +20,7 @@ default_mode_request_user_input = true
 ```
 
 Pilotfish owns the orchestration contract, not the user's main-session model
-preference. Fresh homes default to Luna/medium with xhigh Plan reasoning;
+preference. Fresh homes default to GPT-6 Luna/max with xhigh Plan reasoning;
 existing model and effort choices are preserved and may be changed later.
 
 - The value is child concurrency: one root plus up to three children. Do not
@@ -256,7 +256,7 @@ python3 "$REPO_ROOT/install/stage_smoke_home.py" \
   --staged-codex-home "$STAGED_CODEX_HOME"
 ```
 
-The helper derives a canonical config containing the installed Luna/medium root
+The helper derives a canonical config containing the installed GPT-6 Luna/max root
 binding, xhigh Plan mode, native Default-mode decision cards, and child
 concurrency `3`.
 It then copies one effective policy, the seven-role manifest, source-owned
@@ -312,8 +312,8 @@ child activity, and child `turn_context.model` and `turn_context.effort`.
 
 For `--autoroute` only, the verifier also accepts `session_metadata` correlation
 when no spawn/activity transport evidence exists. The metadata path requires
-exactly one Luna/medium root and one directly linked `plan-verifier` child at
-Sol/high; any mixed, orphaned, duplicate, or malformed evidence fails closed.
+exactly one GPT-6 Luna/max root and one directly linked `plan-verifier` child at
+GPT-6 Sol/high; any mixed, orphaned, duplicate, or malformed evidence fails closed.
 The probe waits once for that child so `codex exec` does not abort it while
 evidence is being written. Receipts normalize effort to `reasoning_effort`,
 hash raw runtime IDs, and record `correlation_mode`. Namespace is not native

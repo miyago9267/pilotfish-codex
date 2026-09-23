@@ -1,6 +1,6 @@
 name = "security-reviewer"
 description = "Read-only security analysis before approval for authentication, authorization, secrets, crypto, validation, hardening, dependency evidence, and threat review."
-model = "gpt-5.6-sol"
+model = "gpt-6-sol"
 model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 web_search = "live"

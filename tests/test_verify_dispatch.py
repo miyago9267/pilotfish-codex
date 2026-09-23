@@ -53,7 +53,7 @@ def parent_events(
     ]
 
 
-def child_events(model: str = "gpt-5.6-luna", effort: str = "low") -> list[dict]:
+def child_events(model: str = "gpt-6-luna", effort: str = "low") -> list[dict]:
     return [{"type": "session_meta", "payload": {"id": CHILD, "parent_thread_id": PARENT}}, {"type": "turn_context", "payload": {"model": model, "effort": effort}}]
 
 
@@ -114,8 +114,8 @@ def autoroute_parent_events(
     call_id: str = CALL,
     include_transport: bool = True,
     parent_id: str = PARENT,
-    model: str = "gpt-5.6-luna",
-    effort: str = "medium",
+    model: str = "gpt-6-luna",
+    effort: str = "max",
 ) -> list[dict]:
     events = [
         {"type": "session_meta", "payload": {"id": parent_id}},
@@ -164,7 +164,7 @@ def autoroute_child_events(
     *,
     child_id: str = CHILD,
     parent_id: str = PARENT,
-    model: str = "gpt-5.6-sol",
+    model: str = "gpt-6-sol",
     effort: str = "high",
     role: str = "plan-verifier",
 ) -> list[dict]:
@@ -415,7 +415,7 @@ class NativeEvidenceTests(unittest.TestCase):
         self.assertIn("wait_agent exactly once", command[-1])
         self.assertIn("a second spawn", command[-1])
 
-    binding = RoleBinding("gpt-5.6-luna", "low")
+    binding = RoleBinding("gpt-6-luna", "low")
 
     def test_namespace_independent_typed_evidence_is_native_ok(self) -> None:
         verdict = inspect_dispatch(parent_events(), child_events(), expected_role=self.binding)
@@ -474,12 +474,12 @@ class NativeEvidenceTests(unittest.TestCase):
 
     def test_explicit_child_binding_may_match_parent_binding(self) -> None:
         events = parent_events()
-        events[1]["payload"].update({"model": "gpt-5.6-luna", "effort": "medium"})
+        events[1]["payload"].update({"model": "gpt-6-luna", "effort": "medium"})
 
         verdict = inspect_dispatch(
             events,
-            child_events(model="gpt-5.6-luna", effort="medium"),
-            expected_role=RoleBinding("gpt-5.6-luna", "medium"),
+            child_events(model="gpt-6-luna", effort="medium"),
+            expected_role=RoleBinding("gpt-6-luna", "medium"),
         )
 
         self.assertEqual((verdict.status, verdict.reason_code), ("NATIVE_OK", "native_verified"))
@@ -548,7 +548,7 @@ class NativeEvidenceTests(unittest.TestCase):
 
 
 class AutomaticPlanReviewEvidenceTests(unittest.TestCase):
-    binding = RoleBinding("gpt-5.6-sol", "high")
+    binding = RoleBinding("gpt-6-sol", "high")
 
     def test_autoroute_command_preserves_hook_trust_and_no_dispatch_directive(self) -> None:
         command = build_autoroute_command(codex_bin="codex", cwd=Path("/tmp/clean-smoke"))
@@ -576,7 +576,7 @@ class AutomaticPlanReviewEvidenceTests(unittest.TestCase):
 
         self.assertEqual(
             (verdict.status, verdict.reason_code, verdict.role, verdict.model, verdict.reasoning_effort),
-            ("NATIVE_OK", "native_verified", "plan-verifier", "gpt-5.6-sol", "high"),
+            ("NATIVE_OK", "native_verified", "plan-verifier", "gpt-6-sol", "high"),
         )
         self.assertEqual(verdict.correlation_mode, "spawn_activity")
 
@@ -789,7 +789,7 @@ class AutomaticPlanReviewEvidenceTests(unittest.TestCase):
         multiple_contexts.append(
             {
                 "type": "turn_context",
-                "payload": {"model": "gpt-5.6-luna", "effort": "medium"},
+                "payload": {"model": "gpt-6-luna", "effort": "max"},
             }
         )
         cases = {
@@ -801,7 +801,7 @@ class AutomaticPlanReviewEvidenceTests(unittest.TestCase):
             "multiple root contexts": multiple_contexts,
             "wrong root model": autoroute_parent_events(
                 include_transport=False,
-                model="gpt-5.6-sol",
+                model="gpt-6-sol",
             ),
             "wrong root effort": autoroute_parent_events(
                 include_transport=False,
@@ -825,7 +825,7 @@ class AutomaticPlanReviewEvidenceTests(unittest.TestCase):
         duplicate_context.append(
             {
                 "type": "turn_context",
-                "payload": {"model": "gpt-5.6-sol", "effort": "high"},
+                "payload": {"model": "gpt-6-sol", "effort": "high"},
             }
         )
         missing_binding = autoroute_child_events()
@@ -849,7 +849,7 @@ class AutomaticPlanReviewEvidenceTests(unittest.TestCase):
         parent = autoroute_parent_events(include_transport=False)
         cases = {
             "wrong child role": autoroute_child_events(role="scout"),
-            "wrong child model": autoroute_child_events(model="gpt-5.6-luna"),
+            "wrong child model": autoroute_child_events(model="gpt-6-luna"),
             "wrong child effort": autoroute_child_events(effort="medium"),
         }
 
@@ -888,7 +888,7 @@ class AutomaticPlanReviewEvidenceTests(unittest.TestCase):
     def test_wrong_linked_child_binding_fails(self) -> None:
         verdict = inspect_autoroute(
             autoroute_parent_events(),
-            {CHILD: autoroute_child_events(model="gpt-5.6-luna", effort="medium")},
+            {CHILD: autoroute_child_events(model="gpt-6-luna", effort="medium")},
             expected_role=self.binding,
             parent_rollout_id=PARENT,
         )
@@ -902,7 +902,7 @@ class NativeHomeAndReceiptTests(unittest.TestCase):
 
         self.assertEqual(project_config_bytes(source), stage_smoke_home.SMOKE_CONFIG)
         with self.assertRaisesRegex(StageError, "Luna routing config"):
-            project_config_bytes(source.replace(b'gpt-5.6-luna', b'gpt-5.6-sol'))
+            project_config_bytes(source.replace(b'gpt-6-luna', b'gpt-6-sol'))
 
     def test_home_pair_rejects_alias_and_nesting(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -954,7 +954,7 @@ class NativeHomeAndReceiptTests(unittest.TestCase):
                 repository_root=ROOT,
                 codex_cwd=smoke_cwd,
                 role="scout",
-                parent_model="gpt-5.6-sol",
+                parent_model="gpt-6-sol",
             )
 
             self.assertIsInstance(verify_dispatch._preflight(args), tuple)
@@ -980,7 +980,7 @@ class NativeHomeAndReceiptTests(unittest.TestCase):
             self.assertEqual(result.reason_code, "stage_layout_untrusted")
 
     def test_receipt_keys_hashes_and_matrix_are_strict(self) -> None:
-        verdict = inspect_dispatch(parent_events(), child_events(), expected_role=RoleBinding("gpt-5.6-luna", "low"))
+        verdict = inspect_dispatch(parent_events(), child_events(), expected_role=RoleBinding("gpt-6-luna", "low"))
         hashes = {"config": "a" * 64, "role_manifest": "b" * 64, "policy": "c" * 64}
         payload = receipt_payload(verdict, codex_version="0.146.0", active=hashes, target=hashes)
         validate_receipt(payload)
@@ -995,7 +995,7 @@ class NativeHomeAndReceiptTests(unittest.TestCase):
         verdict = inspect_autoroute(
             events,
             {CHILD: autoroute_child_events()},
-            expected_role=RoleBinding("gpt-5.6-sol", "high"),
+            expected_role=RoleBinding("gpt-6-sol", "high"),
             parent_rollout_id=PARENT,
         )
         self.assertEqual(
@@ -1009,7 +1009,7 @@ class NativeHomeAndReceiptTests(unittest.TestCase):
         hashes = {"config": "a" * 64, "role_manifest": "b" * 64, "policy": "c" * 64}
         with self.assertRaises(Exception):
             receipt_payload(verify_dispatch._verdict("FAILED", "codex_exec_failed", phase="execution-pre-child", child_created="yes"), codex_version="0.146.0", active=hashes, target=hashes)
-        success = receipt_payload(inspect_dispatch(parent_events(), child_events(), expected_role=RoleBinding("gpt-5.6-luna", "low")), codex_version="0.146.0", active=hashes, target=hashes)
+        success = receipt_payload(inspect_dispatch(parent_events(), child_events(), expected_role=RoleBinding("gpt-6-luna", "low")), codex_version="0.146.0", active=hashes, target=hashes)
         newer = dict(success, codex_version="0.147.0-alpha.1.2")
         validate_receipt(newer)
         success["target_policy_sha256"] = "d" * 64
@@ -1025,7 +1025,7 @@ class NativeHomeAndReceiptTests(unittest.TestCase):
         verdict = inspect_dispatch(
             parent_events(),
             child_events(),
-            expected_role=RoleBinding("gpt-5.6-luna", "low"),
+            expected_role=RoleBinding("gpt-6-luna", "low"),
         )
         payload = receipt_payload(
             verdict,
@@ -1038,7 +1038,7 @@ class NativeHomeAndReceiptTests(unittest.TestCase):
         metadata_verdict = inspect_autoroute(
             autoroute_parent_events(include_transport=False),
             {CHILD: autoroute_child_events()},
-            expected_role=RoleBinding("gpt-5.6-sol", "high"),
+            expected_role=RoleBinding("gpt-6-sol", "high"),
             parent_rollout_id=PARENT,
         )
         metadata_payload = receipt_payload(

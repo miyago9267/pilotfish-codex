@@ -2,7 +2,7 @@
 id: pilotfish-work-status
 title: Pilotfish Codex work status
 status: active
-updated: 2026-09-21
+updated: 2026-09-23
 owner: Miyago
 ---
 
@@ -17,7 +17,7 @@ owner: Miyago
 QA 與 bounded implementation 使用 Sol；只有深層架構或衝突證據才自動開 Astra
 typed role，並保留防止 tunnel vision 的固定工作包與一次性升級邊界。
 
-## Current release — v1.8.0
+## Previous release — v1.8.0
 
 - [x] Automatic model routing spec and route-marker implementation are implemented.
 - [x] `UserPromptSubmit` now emits a redacted `atomic`/`guarded`/`judgment`/
@@ -25,8 +25,8 @@ typed role，並保留防止 tunnel vision 的固定工作包與一次性升級�
   Astra is reserved for high-confidence deep judgment.
 - [x] Stop hook retries a missing typed route once, pins
   `fork_turns=none`, and does not re-lock an already continued turn.
-- [x] `sol-executor`, `verifier`, and the existing Sol review roles bind to
-  `gpt-5.6-sol@high`; only deep `executor` remains `gpt-6-astra@high`.
+- [x] At v1.8.0, `sol-executor`, `verifier`, and the existing Sol review roles
+  bound to `gpt-5.6-sol@high`; only deep `executor` used `gpt-6-astra@high`.
 - [x] Prompt-lock and full test pass; effective Orca home roles and full
   `~/.codex` installer dry-run are verified.
 - [x] Full global hook/Plugin install for `1.8.0` is verified in the active
@@ -38,6 +38,21 @@ typed role，並保留防止 tunnel vision 的固定工作包與一次性升級�
 
 - [x] `VERSION`, Plugin manifest, installer constant, and policy markers are
   synchronized to `1.8.0`.
+
+## Release candidate — v1.8.1 (release pending)
+
+- [x] Role defaults use GPT-6 Luna/Sol, preserving GPT-6 Astra for deep
+  execution; fresh-session config defaults to Luna/max.
+- [x] Verification policy avoids a second verifier for low-risk local work and
+  caps risk-triggered outcome verification at one fresh pass; approval,
+  security, and release gates remain intact.
+- [x] Both global Codex homes now use Luna/max, GPT-6 role manifests, and the
+  enabled v1.8.1 Plugin. Shared AGENTS policy and hook were installed through
+  the primary home; Orca consumes them through its existing symlinks.
+- [x] Offline suite passes: 444 tests, 1 skipped; prompt lock and role tests
+  pass.
+- Release acceptance: commit and push the snapshot, verify CI, publish the
+  v1.8.1 GitHub release, and confirm the remote tag and release entry.
 
 ### Inherited rc.5 evidence
 

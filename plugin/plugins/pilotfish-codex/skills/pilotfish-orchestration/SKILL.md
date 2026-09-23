@@ -43,6 +43,12 @@ work:
 - `mech-executor` and `scout` are baseline-only Luna roles; never pass an Astra
   override. Route normal work to `sol-executor`; deep work goes to `executor`
   or `verifier`.
+
+Keep verification risk-proportionate: one targeted primary acceptance check
+for low-risk local work; add at most one independent verifier pass when the
+risk policy requires it. Do not repeat checks when the artifact and evidence
+are unchanged; preserve approval, security, and release gates.
+
 - `security-reviewer`: pre-approval security evidence.
 - `security-executor`: approved security-sensitive implementation.
 - `verifier`: fresh-context falsification after primary acceptance.

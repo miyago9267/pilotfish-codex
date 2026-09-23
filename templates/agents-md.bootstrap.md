@@ -1,5 +1,5 @@
 <!-- pilotfish-codex:begin -->
-<!-- pilotfish-codex v1.8.0 -->
+<!-- pilotfish-codex v1.8.1 -->
 <!-- markdownlint-disable-next-line MD041 -->
 ### Pilotfish always-on bootstrap
 
@@ -34,8 +34,11 @@ Pilotfish supplements them and does not replace their precedence boundary.
 - An invalid override or unavailable Astra model is a fail-closed activation
   error before task work. Start a new no-flags session to use the normal
   Luna/Sol policy.
-- Keep `plan-verifier` on `gpt-5.6-sol@high`; approval, security, release, and
-  fresh-verifier gates remain unchanged.
+- Use GPT-6 role bindings, including `plan-verifier` on Sol/high; preserve
+  approval, security, and release gates.
+- Avoid duplicate verification: do one targeted primary acceptance check, then
+  at most one fresh `verifier` pass when the risk policy requires it. Do not
+  repeat an unchanged check or add a second verifier without new evidence.
 - Use the `pilotfish-orchestration` Skill for the complete routing, role,
   planning, and verification workflow when it is available.
 - If the Skill or Plugin is unavailable, keep these core invariants active and

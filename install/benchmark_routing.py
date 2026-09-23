@@ -53,8 +53,8 @@ DEFAULT_LIVE_MAX_COST_USD = 1.00
 BENCHMARK_WAIT_TIMEOUT_MS = 120_000
 LIVE_ESTIMATE_INPUT_TOKENS = 20_000
 LIVE_ESTIMATE_OUTPUT_TOKENS = 4_000
-PARENT_MODEL = "gpt-5.6-luna"
-PARENT_EFFORT = "medium"
+PARENT_MODEL = "gpt-6-luna"
+PARENT_EFFORT = "max"
 PARENT_PROMPT = (
     "Run this benchmark task exactly as written. First classify the work surface "
     "as atomic one-command/one-action, normal judgment, or deep judgment. Keep "
@@ -75,8 +75,8 @@ PARENT_PROMPT = (
 REVIEW_VERDICTS = frozenset({"accept", "reject", "inconclusive"})
 CHAIN_ORDERS = ("LTS", "LS", "TS", "S")
 NATIVE_V2_BENCHMARK_CONFIG = (
-    b'model = "gpt-5.6-luna"\n'
-    b'model_reasoning_effort = "medium"\n'
+    b'model = "gpt-6-luna"\n'
+    b'model_reasoning_effort = "max"\n'
     b'plan_mode_reasoning_effort = "xhigh"\n\n'
     b"[features]\n"
     b"default_mode_request_user_input = true\n\n"
@@ -163,14 +163,14 @@ ROLE_CANDIDATES: dict[str, tuple[Candidate, Candidate]] = {
         Candidate("gpt-6-astra", "high"),
     ),
     "semantic-adjudicator": (
-        Candidate("gpt-5.6-sol", "high"),
+        Candidate("gpt-6-sol", "high"),
         Candidate("gpt-6-astra", "high"),
     ),
 }
 BASELINE_ONLY_ROLES = frozenset({"mech-executor", "scout"})
 BASELINE_ONLY_BINDINGS = {
-    "mech-executor": Candidate("gpt-5.6-luna", "medium"),
-    "scout": Candidate("gpt-5.6-luna", "low"),
+    "mech-executor": Candidate("gpt-6-luna", "medium"),
+    "scout": Candidate("gpt-6-luna", "low"),
 }
 
 
@@ -315,6 +315,8 @@ LIVE_COHORTS = ("routine", "judgment")
 # native rollout ledger. Cache reads are billed at 10% of input and cache writes
 # at 125%; long-context requests apply the documented input/output surcharge.
 MODEL_PRICES: dict[str, tuple[float, float]] = {
+    "gpt-6-luna": (0.10, 0.50),
+    "gpt-6-sol": (2.00, 10.00),
     "gpt-5.6-luna": (0.20, 1.20),
     "gpt-5.6-terra": (2.00, 12.00),
     "gpt-5.6-sol": (4.00, 20.00),
@@ -327,12 +329,16 @@ LONG_CONTEXT_INPUT_MULTIPLIER = 2.0
 LONG_CONTEXT_OUTPUT_MULTIPLIER = 1.5
 TOKEN_EFFICIENCY_FACTORS: dict[str, dict[str, float]] = {
     "agentic": {
+        "gpt-6-luna": 1.0,
+        "gpt-6-sol": 1.0,
         "gpt-5.6-luna": 1.0,
         "gpt-5.6-terra": 1.0,
         "gpt-5.6-sol": 1.0,
         "gpt-6-astra": 1 / 3,
     },
     "reasoning": {
+        "gpt-6-luna": 1.0,
+        "gpt-6-sol": 1.0,
         "gpt-5.6-luna": 1.0,
         "gpt-5.6-terra": 1.0,
         "gpt-5.6-sol": 1.0,
@@ -1625,7 +1631,7 @@ def build_benchmark_codex_command(
     )
     try:
         effort_index = command.index("-c") + 1
-        command[effort_index] = 'model_reasoning_effort="medium"'
+        command[effort_index] = 'model_reasoning_effort="max"'
         sandbox_index = command.index("-s") + 1
         command[sandbox_index] = "workspace-write"
     except (ValueError, IndexError) as exc:

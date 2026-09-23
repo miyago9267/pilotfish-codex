@@ -301,14 +301,14 @@ def _route_signal(
     if security_route:
         required_role = "security-reviewer"
         model_policy = "specialized"
-        model_snapshot = "gpt-5.6-sol@high"
+        model_snapshot = "gpt-6-sol@high"
         purpose = "pre_approval_security_review"
         dispatch = {"mode": "existing_review_gate"}
         escalate_on: list[str] = []
     elif route in {"atomic", "guarded"}:
         required_role = "none"
         model_policy = "cheap"
-        model_snapshot = "gpt-5.6-luna@medium"
+        model_snapshot = "gpt-6-luna@max"
         purpose = (
             "local_atomic_action" if route == "atomic" else "cheap_guarded_probe"
         )
@@ -317,7 +317,7 @@ def _route_signal(
     elif route == "judgment":
         required_role = SOL_EXECUTOR_ROLE
         model_policy = "capable"
-        model_snapshot = "gpt-5.6-sol@high"
+        model_snapshot = "gpt-6-sol@high"
         purpose = "bounded_judgment_execution"
         dispatch = {
             "agent_type": SOL_EXECUTOR_ROLE,
@@ -861,7 +861,7 @@ def _linked_child_status(
         } and not isinstance(event.get("payload"), dict):
             return -1
     contexts = [event["payload"] for event in events if event.get("type") == "turn_context"]
-    if len(contexts) != 1 or contexts[0].get("model") != "gpt-5.6-sol" or contexts[0].get("effort") != "high":
+    if len(contexts) != 1 or contexts[0].get("model") != "gpt-6-sol" or contexts[0].get("effort") != "high":
         return -1
     if any(
         event.get("type") == "event_msg"

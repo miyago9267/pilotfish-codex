@@ -55,8 +55,8 @@ AUTO_ROUTE_PROMPT = (
     "approval recommendation and every P0-P2 blocker you find."
 )
 AUTO_ROUTE_DIRECTIVE_TOKENS = ("spawn", "delegate", "subagent")
-AUTO_ROUTE_PARENT_MODEL = "gpt-5.6-luna"
-AUTO_ROUTE_PARENT_EFFORT = "medium"
+AUTO_ROUTE_PARENT_MODEL = "gpt-6-luna"
+AUTO_ROUTE_PARENT_EFFORT = "max"
 NATIVE_MULTI_AGENT_FEATURE = "multi_agent_v2"
 CORRELATION_MODES = frozenset({"spawn_activity", "session_metadata"})
 RECEIPT_KEYS = frozenset({
@@ -1580,7 +1580,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--active-codex-home", type=Path, required=True)
     parser.add_argument("--repository-root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--codex-cwd", type=Path, required=True)
-    parser.add_argument("--parent-model", default="gpt-5.6-luna")
+    parser.add_argument("--parent-model", default="gpt-6-luna")
     parser.add_argument("--receipt", type=Path)
     parser.add_argument("--launch-capture", type=Path)
     args = parser.parse_args(raw)

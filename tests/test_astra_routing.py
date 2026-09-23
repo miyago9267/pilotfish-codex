@@ -31,6 +31,8 @@ from routing_contract import (  # noqa: E402
 
 class AstraPricingTests(unittest.TestCase):
     def test_current_model_prices_include_astra(self) -> None:
+        self.assertEqual(benchmark.MODEL_PRICES["gpt-6-luna"], (0.10, 0.50))
+        self.assertEqual(benchmark.MODEL_PRICES["gpt-6-sol"], (2.00, 10.00))
         self.assertEqual(benchmark.MODEL_PRICES["gpt-5.6-luna"], (0.20, 1.20))
         self.assertEqual(benchmark.MODEL_PRICES["gpt-5.6-terra"], (2.00, 12.00))
         self.assertEqual(benchmark.MODEL_PRICES["gpt-5.6-sol"], (4.00, 20.00))
@@ -127,7 +129,7 @@ class AstraMainSessionContractTests(unittest.TestCase):
             self.assertIn(token, command_sources)
         self.assertIn("session-only", command_sources)
         self.assertIn("zero-write", command_sources)
-        self.assertIn('model = "gpt-5.6-luna"', config)
+        self.assertIn('model = "gpt-6-luna"', config)
         self.assertNotIn('model = "gpt-6-astra"', config)
 
     def test_native_activation_command_is_explicit_and_bounded(self) -> None:
@@ -244,12 +246,12 @@ class AstraRoleRoutingTests(unittest.TestCase):
 
     def test_verifier_is_sol_by_default(self) -> None:
         candidate, reason = benchmark.select_role_candidate("verifier", complexity="routine")
-        self.assertEqual(candidate.as_dict(), {"model": "gpt-5.6-sol", "reasoning_effort": "high"})
+        self.assertEqual(candidate.as_dict(), {"model": "gpt-6-sol", "reasoning_effort": "high"})
         self.assertEqual(reason, "baseline")
 
     def test_critical_without_an_allowed_capability_trigger_stays_baseline(self) -> None:
         candidate, reason = benchmark.select_role_candidate("verifier", complexity="critical")
-        self.assertEqual(candidate.as_dict(), {"model": "gpt-5.6-sol", "reasoning_effort": "high"})
+        self.assertEqual(candidate.as_dict(), {"model": "gpt-6-sol", "reasoning_effort": "high"})
         self.assertEqual(reason, "baseline")
 
     def test_sol_executor_never_promotes_itself_to_astra(self) -> None:
@@ -259,7 +261,7 @@ class AstraRoleRoutingTests(unittest.TestCase):
             tool_actions=20,
             external_evidence=True,
         )
-        self.assertEqual(candidate.as_dict(), {"model": "gpt-5.6-sol", "reasoning_effort": "high"})
+        self.assertEqual(candidate.as_dict(), {"model": "gpt-6-sol", "reasoning_effort": "high"})
         self.assertEqual(reason, "sol-default")
 
     def test_long_horizon_and_disagreement_are_explicit_astra_triggers(self) -> None:
@@ -277,7 +279,7 @@ class AstraRoleRoutingTests(unittest.TestCase):
             tool_actions=2,
             external_evidence=True,
         )
-        self.assertEqual(candidate.as_dict(), {"model": "gpt-5.6-sol", "reasoning_effort": "high"})
+        self.assertEqual(candidate.as_dict(), {"model": "gpt-6-sol", "reasoning_effort": "high"})
         self.assertEqual(reason, "baseline")
 
     def test_candidate_projection_is_provider_explicit_and_bounded(self) -> None:
@@ -299,7 +301,7 @@ class AstraRoleRoutingTests(unittest.TestCase):
                     external_evidence=True,
                     disagreement=True,
                 )
-                self.assertEqual(candidate.model, "gpt-5.6-luna")
+                self.assertEqual(candidate.model, "gpt-6-luna")
                 self.assertEqual(reason, "baseline-only")
 
     def test_mechanical_role_binding_drift_fails_closed(self) -> None:
@@ -326,13 +328,13 @@ class AstraRoleRoutingTests(unittest.TestCase):
 
     def test_role_fitness_binding_is_loaded_from_template(self) -> None:
         expected = fitness.load_expected_bindings()
-        self.assertEqual(expected["security-reviewer"], ("gpt-5.6-sol", "high"))
+        self.assertEqual(expected["security-reviewer"], ("gpt-6-sol", "high"))
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for source in (ROOT / "templates" / "agents").glob("*.toml"):
                 content = source.read_text(encoding="utf-8")
                 if source.stem == "security-reviewer":
-                    content = content.replace("gpt-5.6-sol", "gpt-6-astra")
+                    content = content.replace("gpt-6-sol", "gpt-6-astra")
                 (root / source.name).write_text(content, encoding="utf-8")
             self.assertEqual(
                 fitness.load_expected_bindings(root)["security-reviewer"],
@@ -440,12 +442,12 @@ class RoutingReceiptTests(unittest.TestCase):
             active=hashes,
             target=hashes,
             expected_role="plan-verifier",
-            expected_binding=verify_dispatch.RoleBinding("gpt-5.6-sol", "high"),
+            expected_binding=verify_dispatch.RoleBinding("gpt-6-sol", "high"),
         )
         routing = payload["routing"]
         self.assertEqual(routing["role"], "plan-verifier")
-        self.assertEqual(routing["model_candidate"], "gpt-5.6-sol")
-        self.assertEqual(routing["model_snapshot"], "gpt-5.6-sol@high")
+        self.assertEqual(routing["model_candidate"], "gpt-6-sol")
+        self.assertEqual(routing["model_snapshot"], "gpt-6-sol@high")
         self.assertEqual(routing["permission_profile"], "read-only")
         self.assertEqual(routing["escalation_reason"], "explicit-risk")
         self.assertNotIn("model", payload)
@@ -462,7 +464,7 @@ class RoutingReceiptTests(unittest.TestCase):
             fork_turns="none",
             parent_ref="a" * 16,
             child_ref="b" * 16,
-            model="gpt-5.6-luna",
+            model="gpt-6-luna",
             reasoning_effort="xhigh",
             correlation_mode="spawn_activity",
         )

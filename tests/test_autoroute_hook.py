@@ -34,7 +34,7 @@ def prompt_input(prompt: str, *, turn_id: str = TURN) -> dict[str, object]:
         "transcript_path": None,
         "cwd": "/workspace",
         "hook_event_name": "UserPromptSubmit",
-        "model": "gpt-5.6-luna",
+        "model": "gpt-6-luna",
         "permission_mode": "never",
         "prompt": prompt,
     }
@@ -52,7 +52,7 @@ def stop_input(
         "transcript_path": str(transcript),
         "cwd": "/workspace",
         "hook_event_name": "Stop",
-        "model": "gpt-5.6-luna",
+        "model": "gpt-6-luna",
         "permission_mode": "never",
         "stop_hook_active": active,
         "last_assistant_message": "private response",
@@ -87,7 +87,7 @@ def child_events(
     output: str = "READY",
     complete: bool = True,
     complete_turn_id: str | None = None,
-    model: str = "gpt-5.6-sol",
+    model: str = "gpt-6-sol",
     effort: str = "high",
 ) -> list[dict[str, object]]:
     child_turn = f"{child_id}-turn"
@@ -197,7 +197,7 @@ class AutorouteHookTests(unittest.TestCase):
                 self.assertIn('"route":"judgment"', context)
                 self.assertIn('"model_policy":"capable"', context)
                 self.assertIn('"required_role":"sol-executor"', context)
-                self.assertIn("gpt-5.6-sol@high", context)
+                self.assertIn("gpt-6-sol@high", context)
                 self.assertNotIn("gpt-6-astra@high", context)
                 self.assertIn('"purpose":"bounded_judgment_execution"', context)
                 self.assertIn(
@@ -228,7 +228,7 @@ class AutorouteHookTests(unittest.TestCase):
             self.assertIn('"route":"guarded"', context)
             self.assertIn('"model_policy":"cheap"', context)
             self.assertIn('"required_role":"none"', context)
-            self.assertNotIn("gpt-5.6-sol@high", context)
+            self.assertNotIn("gpt-6-sol@high", context)
             self.assertNotIn("gpt-6-astra@high", context)
             self.assertEqual(list((home / gate.MARKER_DIRECTORY).glob("*.json")), [])
 
@@ -246,7 +246,7 @@ class AutorouteHookTests(unittest.TestCase):
             context = payload["hookSpecificOutput"]["additionalContext"]
             self.assertIn('"route":"judgment"', context)
             self.assertIn('"required_role":"sol-executor"', context)
-            self.assertIn("gpt-5.6-sol@high", context)
+            self.assertIn("gpt-6-sol@high", context)
             self.assertNotIn("gpt-6-astra@high", context)
 
     def test_deep_judgment_route_automatically_requires_strong_executor(self) -> None:
@@ -820,7 +820,7 @@ class AutorouteHookTests(unittest.TestCase):
 
     def test_direct_chain_wrong_binding_or_incomplete_child_retries(self) -> None:
         cases = (
-            {"model": "gpt-5.6-luna"},
+            {"model": "gpt-6-luna"},
             {"complete": False},
         )
         for child_options in cases:
@@ -1125,7 +1125,7 @@ class ScanBoundaryTests(unittest.TestCase):
             day = home / "sessions" / "2023" / "11" / "14"
             write_events(
                 day / "child.jsonl",
-                child_events("linked-child", model="gpt-5.6-luna"),
+                child_events("linked-child", model="gpt-6-luna"),
             )
 
             self.assertEqual(

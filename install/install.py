@@ -104,7 +104,7 @@ class PolicyTargetIdentity:
 
 MIN_COMPATIBLE_CODEX_VERSION = (0, 147, 0)
 PILOTFISH_PLUGIN_NAME = "pilotfish-codex"
-PILOTFISH_PLUGIN_VERSION = "1.8.0"
+PILOTFISH_PLUGIN_VERSION = "1.8.1"
 RUNTIME_STATUSES = frozenset({"integrated", "integrated-plugin-unavailable"})
 RECONCILIATION_STATE_VERSION = 4
 
@@ -415,9 +415,9 @@ def merge_config_text(
     notes: list[str] = []
     missing_root_defaults = []
     if "model" not in config:
-        missing_root_defaults.append(('model = "gpt-5.6-luna"', "set model = gpt-5.6-luna"))
+        missing_root_defaults.append(('model = "gpt-6-luna"', "set model = gpt-6-luna"))
     if "model_reasoning_effort" not in config:
-        missing_root_defaults.append(("model_reasoning_effort = \"medium\"", "set model_reasoning_effort = medium"))
+        missing_root_defaults.append(("model_reasoning_effort = \"max\"", "set model_reasoning_effort = max"))
     if "plan_mode_reasoning_effort" not in config:
         missing_root_defaults.append(("plan_mode_reasoning_effort = \"xhigh\"", "set plan_mode_reasoning_effort = xhigh"))
     if missing_root_defaults:

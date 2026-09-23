@@ -52,8 +52,8 @@ SOURCE_HOOK_REGISTRATION = Path(__file__).resolve().parents[1] / "templates" / "
 ROLLBACK_STAMP_RE = re.compile(r"^(?:\d{8}-\d{6}|\d{8}-\d{6}-\d{6})$")
 LEGACY_ROLE_ROLLBACK_STAMP_RE = re.compile(r"^\d{8}$")
 SMOKE_CONFIG = (
-    b'model = "gpt-5.6-luna"\n'
-    b'model_reasoning_effort = "medium"\n'
+    b'model = "gpt-6-luna"\n'
+    b'model_reasoning_effort = "max"\n'
     b'plan_mode_reasoning_effort = "xhigh"\n\n'
     b"[agents]\n"
     b"max_concurrent_threads_per_session = 3\n\n"
@@ -87,8 +87,8 @@ def project_config_bytes(content: bytes) -> bytes:
     if AGENTS_CONCURRENCY_KEY in config:
         raise StageError("legacy root concurrency config is unavailable")
     if (
-        config.get("model") != "gpt-5.6-luna"
-        or config.get("model_reasoning_effort") != "medium"
+        config.get("model") != "gpt-6-luna"
+        or config.get("model_reasoning_effort") != "max"
         or config.get("plan_mode_reasoning_effort") != "xhigh"
     ):
         raise StageError("required Luna routing config is unavailable")

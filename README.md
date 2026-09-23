@@ -46,7 +46,7 @@ not need every role.
 | `co_discover` | Root session + bounded `scout` → `execute` or `explore_then_plan` | Turn an idea into a stable problem, target, MVP, and acceptance boundary. |
 | Security-sensitive work | `security-reviewer` → approved Plan → `security-executor` → `verifier` | Keep security evidence and implementation on separate capability boundaries. |
 
-The seven installed roles are:
+The eight installed roles are:
 
 | Role | Responsibility |
 | --- | --- |
@@ -54,6 +54,7 @@ The seven installed roles are:
 | `plan-verifier` | Pre-approval challenge of a material Plan. |
 | `executor` | Bounded implementation requiring engineering judgment. |
 | `mech-executor` | Fully specified mechanical implementation. |
+| `sol-executor` | Bounded implementation using ordinary engineering judgment. |
 | `security-reviewer` | Read-only security evidence before approval. |
 | `security-executor` | Approved security-sensitive implementation. |
 | `verifier` | Fresh-context outcome or direction-checkpoint verification. |
@@ -82,12 +83,12 @@ benchmark used a fixed artifact task as a native-rollout proxy:
   alt="Median wall time per candidate"
   width="720">
 
-That supports cheap Luna for one-command/one-action and mechanical work; Astra
-for design, tool choice, interpretation, multi-step execution, and strong
-verification; and Sol for narrower `plan-verifier` and security review
-boundaries. The root model does not switch automatically. This is a routing
-decision, not a general intelligence ranking. The complete benchmark and bar
-charts are in the
+The archived v6 benchmark predates the GPT-6 role bindings and is not a
+comparative quality or latency result for GPT-6. The current policy uses Luna
+for atomic and mechanical work, Sol for routine judgment, design, and QA, and
+Astra only for deep architecture or conflicting evidence. The root session
+does not switch models automatically. This is a routing decision, not a
+general intelligence ranking. The historical benchmark and charts are in the
 [usage-routing benchmark](./docs/benchmarks/usage-routing-v1/README.md).
 
 ## Opt-in Astra main-session mode
@@ -104,14 +105,14 @@ codex --model gpt-6-astra \
   -c agents.max_concurrent_threads_per_session=1
 ```
 
-The overrides are zero-write and session-only; the installed root Luna/Plan and
-Sol review config,
-roles, hooks, and approval boundaries remain unchanged. The prompt recommends
-named inputs, one sufficient pass, and stopping at acceptance evidence. Its
+The overrides are zero-write and session-only; the installed root Luna/Plan,
+Sol review config, roles, hooks, and approval boundaries remain unchanged. The
+prompt recommends named inputs, one sufficient pass, and stopping at
+acceptance evidence. Its
 `max_tool_calls=12` and `max_wall_seconds=300` limits are advisory, not a
-provider-enforced quota. `mech-executor` and `scout` stay on Luna, while
-judgment-heavy `executor` and `verifier` routes use Astra, and
-`plan-verifier` stays on Sol/high. If Astra is unavailable or an override is
+provider-enforced quota. `mech-executor` and `scout` stay on Luna, normal
+judgment and verification use Sol, and `executor` uses Astra only at the deep
+boundary. If Astra is unavailable or an override is
 invalid, activation fails closed before task work; start a new session without
 the flags to return to the normal policy.
 

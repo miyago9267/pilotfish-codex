@@ -147,8 +147,8 @@ class NativeConfigMergeTests(unittest.TestCase):
     def test_empty_config_renders_exact_native_table(self) -> None:
         rendered, _ = merge_config_text("")
         data = tomllib.loads(rendered)
-        self.assertEqual(data["model"], "gpt-5.6-luna")
-        self.assertEqual(data["model_reasoning_effort"], "medium")
+        self.assertEqual(data["model"], "gpt-6-luna")
+        self.assertEqual(data["model_reasoning_effort"], "max")
         self.assertEqual(data["plan_mode_reasoning_effort"], "xhigh")
         self.assertTrue(data["features"]["default_mode_request_user_input"])
         self.assertEqual(data["agents"]["max_concurrent_threads_per_session"], 3)
@@ -702,11 +702,11 @@ class NativeInstallTests(unittest.TestCase):
             self.assertEqual(self.run_install(home), 0)
             config = home / "config.toml"
             changed = config.read_text().replace(
-                'model = "gpt-5.6-luna"', 'model = "gpt-5.6-sol"'
+                'model = "gpt-6-luna"', 'model = "gpt-6-sol"'
             )
             config.write_text(changed)
             self.assertEqual(self.run_install(home), 0)
-            self.assertIn('model = "gpt-5.6-sol"', config.read_text())
+            self.assertIn('model = "gpt-6-sol"', config.read_text())
 
     def test_reconcile_current_policy_preserves_bytes_and_publishes_v4_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1015,7 +1015,7 @@ class NativeInstallTests(unittest.TestCase):
                         {
                             "name": "pilotfish-codex",
                             "marketplaceName": "pilotfish-codex",
-                            "version": "1.8.1",
+                            "version": "1.8.2",
                             "enabled": True,
                         }
                     ]

@@ -40,17 +40,17 @@ replaced targets; it creates none.
 
 An explicit Astra main session is a zero-write, session-only preference. The
 user starts it with `gpt-6-astra`, `high` main and Plan effort, and one optional
-child; the default root config remains Luna/medium with Plan xhigh. Without a
+child; the default root config is GPT-6 Luna/max with Plan xhigh. Without a
 root override, automatic routing uses the installed Astra `executor` and
 `verifier` roles for design, tool use, interpretation, and judgment, while
 routine and mechanical work stays on the installed Luna roles. The
 prompt's `max_tool_calls=12` and `max_wall_seconds=300` values are advisory
 usage guards, not provider quota enforcement. Invalid or unavailable Astra
 activation fails closed before task work; a separately started no-flags session
-returns to the normal root Luna/Sol policy. `plan-verifier` remains Sol/high and
-all approval, security, release, and fresh-verifier boundaries remain intact. This
-slice adds no main-session typed-dispatch receipt field; existing child receipt
-schemas remain unchanged.
+returns to the normal root Luna/Sol policy. `plan-verifier` uses GPT-6 Sol/high;
+all approval, security, release, and fresh-verifier boundaries remain intact.
+This slice adds no main-session typed-dispatch receipt field; existing child
+receipt schemas remain unchanged.
 
 The role manifest is seven recursively discovered TOMLs. Pilotfish validates a
 single approved staged manifest and rejects duplicate names, filename/name

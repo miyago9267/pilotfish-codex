@@ -15,8 +15,8 @@ class NativeTemplateTests(unittest.TestCase):
     def test_exact_agents_table_has_no_legacy_transport(self) -> None:
         with (ROOT / "templates" / "config.snippet.toml").open("rb") as handle:
             config = tomllib.load(handle)
-        self.assertEqual(config["model"], "gpt-5.6-luna")
-        self.assertEqual(config["model_reasoning_effort"], "medium")
+        self.assertEqual(config["model"], "gpt-6-luna")
+        self.assertEqual(config["model_reasoning_effort"], "max")
         self.assertEqual(config["plan_mode_reasoning_effort"], "xhigh")
         self.assertTrue(config["features"]["default_mode_request_user_input"])
         self.assertEqual(config["agents"]["max_concurrent_threads_per_session"], 3)
@@ -45,15 +45,15 @@ class NativeTemplateTests(unittest.TestCase):
             executor = tomllib.load(handle)
         self.assertEqual(
             (plan_verifier["model"], plan_verifier["model_reasoning_effort"]),
-            ("gpt-5.6-sol", "high"),
+            ("gpt-6-sol", "high"),
         )
         self.assertEqual(
             (verifier["model"], verifier["model_reasoning_effort"]),
-            ("gpt-5.6-sol", "high"),
+            ("gpt-6-sol", "high"),
         )
         self.assertEqual(
             (security_executor["model"], security_executor["model_reasoning_effort"]),
-            ("gpt-5.6-sol", "high"),
+            ("gpt-6-sol", "high"),
         )
         self.assertEqual(
             (executor["model"], executor["model_reasoning_effort"]),
@@ -61,7 +61,7 @@ class NativeTemplateTests(unittest.TestCase):
         )
         self.assertEqual(
             (sol_executor["model"], sol_executor["model_reasoning_effort"]),
-            ("gpt-5.6-sol", "high"),
+            ("gpt-6-sol", "high"),
         )
         for path in agents.glob("*.toml"):
             with path.open("rb") as handle:

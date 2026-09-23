@@ -7,6 +7,14 @@ are noted only as source references.
 
 ## Unreleased
 
+## v1.8.1
+
+- Upgrade packaged role bindings to GPT-6 Luna/Sol while retaining Astra for
+  deep execution; default fresh-session root to Luna/max.
+- Reduce duplicate verification for low-risk work while preserving one
+  risk-triggered independent verifier and all approval/security/release gates.
+- Update staged runtime validation and pricing support for the active models.
+
 ## v1.8.0
 
 - Promote the Luna/Sol/Astra automatic routing policy from the release

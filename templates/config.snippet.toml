@@ -1,7 +1,7 @@
 # Pilotfish native Codex Multi-Agent configuration for Codex 0.147+.
 # Merge these keys and tables into ~/.codex/config.toml.
-model = "gpt-5.6-luna"
-model_reasoning_effort = "medium"
+model = "gpt-6-luna"
+model_reasoning_effort = "max"
 plan_mode_reasoning_effort = "xhigh"
 
 # Child concurrency: the root plus up to three children.

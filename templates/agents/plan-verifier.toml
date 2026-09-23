@@ -1,6 +1,6 @@
 name = "plan-verifier"
 description = "Read-only Sol review of a material Plan: readiness review before approval or one-shot semantic adjudication after a fingerprinted Luna disagreement."
-model = "gpt-5.6-sol"
+model = "gpt-6-sol"
 model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 

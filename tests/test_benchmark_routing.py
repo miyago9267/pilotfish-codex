@@ -315,7 +315,7 @@ class ReceiptMetricsTests(unittest.TestCase):
         self.assertEqual(metrics.output, 50)
         self.assertEqual(metrics.reasoning_output, 20)
         self.assertEqual(metrics.total, 200)
-        self.assertAlmostEqual(metrics.cost, 0.0000848)
+        self.assertAlmostEqual(metrics.cost, 0.0000555)
         self.assertEqual(metrics.source, "native-rollout-proxy")
 
     def test_native_rollout_prices_fixed_luna_parent_separately_from_child(self) -> None:
@@ -361,7 +361,7 @@ class ReceiptMetricsTests(unittest.TestCase):
                 parent_rollout=paths[0],
                 child_rollout=paths[1],
             )
-        self.assertAlmostEqual(metrics.cost, 0.0003746)
+        self.assertAlmostEqual(metrics.cost, 0.0003453)
 
     def test_codexbar_nested_schema_drift_fails_closed(self) -> None:
         totals = {

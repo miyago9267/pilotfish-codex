@@ -1,6 +1,6 @@
 name = "security-executor"
 description = "Security-sensitive implementation after approval for authentication, authorization, secrets, crypto, validation, hardening, and dependency remediation."
-model = "gpt-5.6-sol"
+model = "gpt-6-sol"
 model_reasoning_effort = "high"
 
 developer_instructions = """

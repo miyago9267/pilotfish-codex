@@ -40,6 +40,9 @@ class PolicyTests(unittest.TestCase):
             "approved, bounded implementation requiring judgment to `sol-executor`",
             "risk-triggered implementation",
             "fresh `verifier` for one independent refutation pass",
+            "For low-risk, local, reversible work",
+            "exactly one fresh outcome-verifier pass",
+            "Do not repeat an unchanged check",
         ):
             self.assertIn(phrase, policy)
 
@@ -50,7 +53,7 @@ class PolicyTests(unittest.TestCase):
         for phrase in (
             "Atomic one-command/one-action work",
             "Normal design, tool choice, interpretation, QA, or bounded implementation",
-            "`sol-executor` / `verifier` Sol binding",
+            "`sol-executor` / `verifier` GPT-6 Sol binding",
             "Use Astra only at the rare deep tier",
             "Automatic typed escalation never switches the root model",
             "main session should not wait for the user to name a subagent",

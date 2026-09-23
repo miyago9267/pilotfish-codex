@@ -33,7 +33,7 @@ from stage_smoke_home import StageError, materialize
 
 
 DEFAULT_ROLES = ("scout",)
-DEFAULT_PARENT_MODEL = "gpt-5.6-luna"
+DEFAULT_PARENT_MODEL = "gpt-6-luna"
 MAX_REPEAT_COUNT = 3
 DEFAULT_STAGE_TIMEOUT = 360
 
