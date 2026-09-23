@@ -273,7 +273,8 @@ class AutorouteHookTests(unittest.TestCase):
             self.assertEqual(record["jev_route"], "mechanical")
             self.assertNotIn(SESSION, log.read_text(encoding="utf-8"))
             self.assertNotIn("請幫我把這批東西整理一下", log.read_text(encoding="utf-8"))
-            self.assertEqual(stat.S_IMODE(log.stat().st_mode), 0o600)
+            if hasattr(os, "fchmod"):
+                self.assertEqual(stat.S_IMODE(log.stat().st_mode), 0o600)
 
     def test_jev_role_mapping_uses_native_typed_roles(self) -> None:
         for route, role in (("mechanical", "mech-executor"), ("exploration", "scout")):

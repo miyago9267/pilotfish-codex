@@ -488,7 +488,10 @@ def _write_jev_shadow(codex_home: Path, base_route: str, suggestion: dict[str, A
             info = os.fstat(descriptor)
             if not stat.S_ISREG(info.st_mode) or info.st_size + len(encoded) > 262_144:
                 return
-            os.fchmod(descriptor, 0o600)
+            # Windows does not expose fchmod; the file descriptor is already
+            # open with the restrictive mode where the platform supports it.
+            if hasattr(os, "fchmod"):
+                os.fchmod(descriptor, 0o600)
             os.write(descriptor, encoded)
         finally:
             os.close(descriptor)
