@@ -1,0 +1,15 @@
+{
+  "name": "pilotfish-jev-router",
+  "version": "0.1.0",
+  "description": "WIP test feature: optional Jev scope classification for Pilotfish role routing.",
+  "author": {"name": "Miyago"},
+  "interface": {
+    "displayName": "Pilotfish Jev Router (WIP)",
+    "shortDescription": "WIP test: optional Jev classification for Pilotfish roles",
+    "longDescription": "Experimental test companion for the canonical Pilotfish route hook. Disabled by default for other installs; active routing is not a stable release and has not passed promotion criteria.",
+    "developerName": "Miyago",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Classify task scope for Pilotfish role routing."
+  }
+}

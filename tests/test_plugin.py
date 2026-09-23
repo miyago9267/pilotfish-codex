@@ -32,5 +32,27 @@ class PluginPackageTests(unittest.TestCase):
             self.assertTrue((skill / "references" / reference).is_file())
         self.assertTrue((skill / "agents" / "openai.yaml").is_file())
 
+    def test_optional_jev_plugin_manifest_matches_marketplace_entry(self) -> None:
+        marketplace = json.loads(
+            (ROOT / "plugin" / ".agents" / "plugins" / "marketplace.json").read_text()
+        )
+        entry = next(
+            plugin
+            for plugin in marketplace["plugins"]
+            if plugin["name"] == "pilotfish-jev-router"
+        )
+        manifest_path = (
+            ROOT
+            / "plugin"
+            / "plugins"
+            / "pilotfish-jev-router"
+            / ".codex-plugin"
+            / "plugin.json"
+        )
+        manifest = json.loads(manifest_path.read_text())
+        self.assertEqual(entry["source"]["path"], "./plugins/pilotfish-jev-router")
+        self.assertEqual(entry["name"], manifest["name"])
+        self.assertEqual(entry["policy"]["installation"], "AVAILABLE")
+
 if __name__ == "__main__":
     unittest.main()

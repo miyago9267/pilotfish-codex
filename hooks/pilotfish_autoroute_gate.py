@@ -21,8 +21,12 @@ ROUTE_SCHEMA = 4
 ROUTE_REQUIRED_TASK = "automatic_model_route"
 SOL_EXECUTOR_ROLE = "sol-executor"
 ASTRA_EXECUTOR_ROLE = "executor"
-AUTOMATIC_ROUTE_ROLES = frozenset({SOL_EXECUTOR_ROLE, ASTRA_EXECUTOR_ROLE})
+AUTOMATIC_ROUTE_ROLES = frozenset(
+    {"mech-executor", "scout", SOL_EXECUTOR_ROLE, ASTRA_EXECUTOR_ROLE}
+)
 AUTOMATIC_ROUTE_BY_ROLE = {
+    "mech-executor": "mechanical",
+    "scout": "exploration",
     SOL_EXECUTOR_ROLE: "judgment",
     ASTRA_EXECUTOR_ROLE: "deep_judgment",
 }
@@ -314,13 +318,23 @@ def _route_signal(
         )
         dispatch = {"mode": "parent_local"}
         escalate_on = list(ROUTE_ESCALATION_EVENTS)
-    elif route == "judgment":
-        required_role = SOL_EXECUTOR_ROLE
-        model_policy = "capable"
-        model_snapshot = "gpt-6-sol@high"
-        purpose = "bounded_judgment_execution"
+    elif route in {"mechanical", "exploration", "judgment"}:
+        required_role = {
+            "mechanical": "mech-executor",
+            "exploration": "scout",
+            "judgment": SOL_EXECUTOR_ROLE,
+        }[route]
+        model_policy = "cheap" if route in {"mechanical", "exploration"} else "capable"
+        model_snapshot = "gpt-6-luna@medium" if route == "mechanical" else (
+            "gpt-6-luna@low" if route == "exploration" else "gpt-6-sol@high"
+        )
+        purpose = {
+            "mechanical": "bounded_mechanical_execution",
+            "exploration": "read_only_reconnaissance",
+            "judgment": "bounded_judgment_execution",
+        }[route]
         dispatch = {
-            "agent_type": SOL_EXECUTOR_ROLE,
+            "agent_type": required_role,
             "fork_turns": "none",
             "mode": "typed_role",
             "task_name": ROUTE_REQUIRED_TASK,
@@ -352,6 +366,134 @@ def _route_signal(
         "escalate_on": escalate_on,
         "reason": execution_route_reason(prompt, route),
     }
+
+
+def _jev_suggestion(prompt: object, codex_home: Path) -> dict[str, Any] | None:
+    """Load the optional companion provider only when explicitly configured."""
+    try:
+        import importlib.util
+
+        configured_mode = os.environ.get("PILOTFISH_JEV_MODE")
+        if configured_mode is None:
+            config_path = codex_home / "pilotfish-jev/config.json"
+            if config_path.is_symlink() or not config_path.is_file():
+                return None
+            if config_path.stat().st_size > 4096:
+                return None
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            configured_mode = config.get("mode") if isinstance(config, dict) else None
+        if configured_mode not in {"shadow", "active"}:
+            return None
+
+        env_root = os.environ.get("PILOTFISH_JEV_PLUGIN_ROOT", "").strip()
+        if env_root:
+            plugin_root = Path(env_root).expanduser()
+            if not plugin_root.is_absolute() or plugin_root.is_symlink():
+                return None
+            module_path = plugin_root / "jev_router.py"
+        else:
+            cache_root = codex_home / "plugins/cache/pilotfish-codex/pilotfish-jev-router"
+            cursor = codex_home
+            for part in Path("plugins/cache/pilotfish-codex/pilotfish-jev-router").parts:
+                cursor /= part
+                if cursor.is_symlink():
+                    return None
+            candidates = []
+            for version_dir in cache_root.iterdir():
+                candidate = version_dir / "jev_router.py"
+                if version_dir.is_dir() and not version_dir.is_symlink() and candidate.is_file() and not candidate.is_symlink():
+                    candidates.append(candidate)
+            if len(candidates) != 1:
+                return None
+            module_path = candidates[0]
+
+        if module_path.is_symlink() or not module_path.is_file():
+            return None
+        manifest_path = module_path.parent / ".codex-plugin/plugin.json"
+        if (
+            manifest_path.is_symlink()
+            or manifest_path.parent.is_symlink()
+            or not manifest_path.is_file()
+            or manifest_path.stat().st_size > 4096
+        ):
+            return None
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if (
+            not isinstance(manifest, dict)
+            or manifest.get("name") != "pilotfish-jev-router"
+            or manifest.get("version") != module_path.parent.name
+        ):
+            return None
+        spec = importlib.util.spec_from_file_location(
+            "pilotfish_optional_jev_router", module_path
+        )
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        mode, plugin_root = module.load_config(codex_home)
+        if mode not in {"shadow", "active"} or plugin_root is None:
+            return None
+        if module_path.parent.resolve() != plugin_root.resolve():
+            return None
+        return module.JevRouter(mode=mode, timeout=1.0).classify(prompt)
+    except (ImportError, OSError, ValueError, AttributeError, TypeError, json.JSONDecodeError):
+        return None
+
+
+def _write_jev_shadow(codex_home: Path, base_route: str, suggestion: dict[str, Any]) -> None:
+    """Persist only bounded, prompt-free route evidence for optional shadow mode."""
+    try:
+        directory = codex_home / "pilotfish-jev"
+        directory.mkdir(mode=0o700, exist_ok=True)
+        if directory.is_symlink() or not directory.is_dir():
+            return
+        path = directory / "shadow-decisions.jsonl"
+        if path.is_symlink():
+            return
+        scores = suggestion.get("scores")
+        safe_scores = (
+            {
+                key: value
+                for key, value in scores.items()
+                if key
+                in {
+                    "parent_local",
+                    "mechanical",
+                    "exploration",
+                    "judgment",
+                    "deep_judgment",
+                }
+                and isinstance(value, (int, float))
+                and math.isfinite(value)
+                and 0 <= value <= 1
+            }
+            if isinstance(scores, dict)
+            else {}
+        )
+        record = {
+            "base_route": base_route,
+            "jev_route": suggestion.get("route"),
+            "score": suggestion.get("score"),
+            "lead": suggestion.get("lead"),
+            "scores": safe_scores,
+        }
+        encoded = (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        descriptor = os.open(
+            path,
+            os.O_APPEND | os.O_CREAT | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        try:
+            info = os.fstat(descriptor)
+            if not stat.S_ISREG(info.st_mode) or info.st_size + len(encoded) > 262_144:
+                return
+            os.fchmod(descriptor, 0o600)
+            os.write(descriptor, encoded)
+        finally:
+            os.close(descriptor)
+    except OSError:
+        return
 
 
 def _blocker_fingerprint(
@@ -1335,7 +1477,28 @@ def _handle_prompt(payload: dict[str, Any], codex_home: Path) -> dict[str, Any] 
     if _is_route_continuation(prompt) and pending_route_marker is not None:
         route_signal = _route_signal_for_marker(payload, pending_route_marker)
     else:
-        route_signal = _route_signal(payload, prompt)
+        base_route = classify_execution_route(prompt)
+        suggestion = None
+        security_sensitive = (
+            isinstance(prompt, str)
+            and _CATEGORY_PATTERNS["security"].search(prompt) is not None
+        )
+        if (
+            base_route not in {"atomic", "deep_judgment"}
+            and not requires_sol_review(categories)
+            and not security_sensitive
+        ):
+            suggestion = _jev_suggestion(prompt, codex_home)
+        if suggestion and suggestion.get("mode") == "shadow":
+            _write_jev_shadow(codex_home, base_route, suggestion)
+        active_route = base_route
+        if (
+            suggestion
+            and suggestion.get("mode") == "active"
+            and suggestion.get("route") in {"guarded", "mechanical", "exploration", "judgment", "deep_judgment"}
+        ):
+            active_route = suggestion["route"]
+        route_signal = _route_signal(payload, prompt, route_override=active_route)
     if requires_sol_review(categories):
         fingerprint = _blocker_fingerprint(prompt, categories)
         previous = _load_marker(codex_home, session_id)

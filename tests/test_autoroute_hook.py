@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+from urllib import request as urllib_request
 from pathlib import Path
 from unittest import mock
 
@@ -136,6 +138,155 @@ def child_events(
 
 
 class AutorouteHookTests(unittest.TestCase):
+    def test_installed_plugin_config_drives_canonical_route_without_live_network(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "codex-home"
+            package = ROOT / "plugin/plugins/pilotfish-jev-router"
+            installed = (
+                home
+                / "plugins/cache/pilotfish-codex/pilotfish-jev-router/0.1.0"
+            )
+            installed.parent.mkdir(parents=True)
+            shutil.copytree(package, installed)
+            (home / "config.toml").write_text(
+                '[plugins."pilotfish-jev-router@pilotfish-codex"]\nenabled = true\n',
+                encoding="utf-8",
+            )
+            config = home / "pilotfish-jev/config.json"
+            config.parent.mkdir(parents=True)
+            config.write_text('{"mode":"active"}', encoding="utf-8")
+
+            scores = {
+                "parent_local": 0.01,
+                "mechanical": 0.96,
+                "exploration": 0.01,
+                "judgment": 0.01,
+                "deep_judgment": 0.01,
+            }
+            result_body = {
+                "model": "jev-1.13.0",
+                "answers": {
+                    label: {"type": "noul", "noul": score}
+                    for label, score in scores.items()
+                },
+            }
+            response = mock.MagicMock()
+            response.__enter__.return_value = response
+            response.read.return_value = json.dumps(result_body).encode("utf-8")
+            environment = dict(os.environ)
+            for key in (
+                "PILOTFISH_JEV_MODE",
+                "PILOTFISH_JEV_PLUGIN_ROOT",
+                "TYPESAFE_API_KEY",
+            ):
+                environment.pop(key, None)
+            with mock.patch.dict(os.environ, environment, clear=True):
+                os.environ["TYPESAFE_API_KEY"] = "offline-test-key"
+                with mock.patch.object(
+                    urllib_request, "urlopen", return_value=response
+                ) as urlopen:
+                    result = gate.handle(
+                        prompt_input("請幫我把這批資料整理一下。"),
+                        codex_home=home,
+                    )
+
+            self.assertEqual(urlopen.call_count, 1)
+            self.assertEqual(
+                urlopen.call_args.args[0].full_url,
+                "https://api.typesafe.ai/v1/systemone",
+            )
+            context = result["hookSpecificOutput"]["additionalContext"]
+            self.assertIn('"route":"mechanical"', context)
+            self.assertIn('"required_role":"mech-executor"', context)
+            marker = gate._load_route_marker(home, SESSION)
+            self.assertIsNotNone(marker)
+            self.assertEqual(marker["required_role"], "mech-executor")
+
+    def test_active_jev_mechanical_choice_uses_canonical_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "codex-home"
+            home.mkdir()
+            suggestion = {
+                "mode": "active",
+                "route": "mechanical",
+                "score": 0.93,
+                "lead": 0.31,
+            }
+            with mock.patch.object(gate, "_jev_suggestion", return_value=suggestion):
+                payload = gate.handle(
+                    prompt_input("請幫我把這批東西整理一下。"),
+                    codex_home=home,
+                )
+
+            context = payload["hookSpecificOutput"]["additionalContext"]
+            self.assertIn('"route":"mechanical"', context)
+            self.assertIn('"required_role":"mech-executor"', context)
+            marker = gate._load_route_marker(home, SESSION)
+            self.assertIsNotNone(marker)
+            self.assertEqual(marker["required_role"], "mech-executor")
+
+    def test_jev_cannot_downgrade_deterministic_security_route(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "codex-home"
+            home.mkdir()
+            suggestion = {
+                "mode": "active",
+                "route": "mechanical",
+                "score": 0.99,
+                "lead": 0.50,
+            }
+            with mock.patch.object(gate, "_jev_suggestion", return_value=suggestion) as classify:
+                payload = gate.handle(
+                    prompt_input("請規劃 credential authorization 的安全審查 Plan。"),
+                    codex_home=home,
+                )
+
+            context = payload["hookSpecificOutput"]["additionalContext"]
+            classify.assert_not_called()
+            self.assertNotIn('"required_role":"mech-executor"', context)
+            self.assertIsNotNone(gate._load_marker(home, SESSION))
+            self.assertIsNone(gate._load_route_marker(home, SESSION))
+
+    def test_shadow_jev_suggestion_does_not_change_route_or_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "codex-home"
+            home.mkdir()
+            suggestion = {
+                "mode": "shadow",
+                "route": "mechanical",
+                "score": 0.93,
+                "lead": 0.31,
+            }
+            with mock.patch.object(gate, "_jev_suggestion", return_value=suggestion):
+                payload = gate.handle(
+                    prompt_input("請幫我把這批東西整理一下。"),
+                    codex_home=home,
+                )
+
+            context = payload["hookSpecificOutput"]["additionalContext"]
+            self.assertIn('"route":"guarded"', context)
+            self.assertNotIn('"required_role":"mech-executor"', context)
+            self.assertIsNone(gate._load_route_marker(home, SESSION))
+            log = home / "pilotfish-jev" / "shadow-decisions.jsonl"
+            record = json.loads(log.read_text(encoding="utf-8"))
+            self.assertEqual(record["base_route"], "guarded")
+            self.assertEqual(record["jev_route"], "mechanical")
+            self.assertNotIn(SESSION, log.read_text(encoding="utf-8"))
+            self.assertNotIn("請幫我把這批東西整理一下", log.read_text(encoding="utf-8"))
+            self.assertEqual(stat.S_IMODE(log.stat().st_mode), 0o600)
+
+    def test_jev_role_mapping_uses_native_typed_roles(self) -> None:
+        for route, role in (("mechanical", "mech-executor"), ("exploration", "scout")):
+            with self.subTest(route=route):
+                signal = gate._route_signal(
+                    {"session_id": SESSION, "turn_id": TURN},
+                    "bounded task",
+                    route_override=route,
+                )
+                self.assertEqual(signal["required_role"], role)
+                self.assertEqual(signal["dispatch"]["agent_type"], role)
+                self.assertEqual(gate.AUTOMATIC_ROUTE_BY_ROLE[role], route)
+
     def test_atomic_route_stays_local_and_cheap(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "codex-home"
