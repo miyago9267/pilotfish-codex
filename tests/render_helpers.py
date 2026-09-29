@@ -60,7 +60,7 @@ class HostRenderCase(unittest.TestCase):
     def edit(self, path: Path, old: str, new: str) -> None:
         text = path.read_text(encoding="utf-8")
         self.assertIn(old, text)
-        path.write_text(text.replace(old, new, 1), encoding="utf-8")
+        path.write_text(text.replace(old, new, 1), encoding="utf-8", newline="\n")
 
     def assert_rejected(self, expected: str) -> None:
         result = self.check()
@@ -97,7 +97,7 @@ class HostRenderCase(unittest.TestCase):
         self.assertIn(self.DIST_FILE, result.stderr)
 
     def test_check_fails_on_extra_or_missing_file(self) -> None:
-        (self.dist / "extra.md").write_text("x", encoding="utf-8")
+        (self.dist / "extra.md").write_text("x", encoding="utf-8", newline="\n")
         (self.dist / self.DIST_FILE).unlink()
         result = self.check()
         self.assertEqual(result.returncode, 1)
@@ -106,13 +106,13 @@ class HostRenderCase(unittest.TestCase):
 
     def test_check_fails_when_source_changes_without_rewriting_dist(self) -> None:
         src = self.root / "hosts" / self.HOST / "src" / self.SRC_FILE
-        src.write_text(src.read_text(encoding="utf-8") + "extra line\n", encoding="utf-8")
+        src.write_text(src.read_text(encoding="utf-8") + "extra line\n", encoding="utf-8", newline="\n")
         result = self.check()
         self.assertEqual(result.returncode, 1)
 
     def test_write_repairs_dist(self) -> None:
         (self.dist / self.DIST_FILE).write_bytes(b"broken")
-        (self.dist / "extra.md").write_text("x", encoding="utf-8")
+        (self.dist / "extra.md").write_text("x", encoding="utf-8", newline="\n")
         self.assertEqual(run_render(self.HOST, self.root, "--write").returncode, 0)
         self.assertEqual(self.check().returncode, 0)
         self.assertFalse((self.dist / "extra.md").exists())
@@ -125,5 +125,5 @@ class HostRenderCase(unittest.TestCase):
     def test_every_role_needs_a_binding_or_omission(self) -> None:
         roles = self.root / "core" / "roles.toml"
         roles.write_text(roles.read_text(encoding="utf-8")
-                         + '\n[roles.ghost]\naccess = "write"\ntier = "fast"\nsecurity = false\n', encoding="utf-8")
+                         + '\n[roles.ghost]\naccess = "write"\ntier = "fast"\nsecurity = false\n', encoding="utf-8", newline="\n")
         self.assert_rejected("ghost")

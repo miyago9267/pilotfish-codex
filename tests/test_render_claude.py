@@ -74,7 +74,7 @@ class CheckCommandTests(unittest.TestCase):
 
     def test_check_fails_on_extra_or_missing_file(self) -> None:
         dist = self.root / "hosts" / "claude" / "dist"
-        (dist / "extra.md").write_text("x", encoding="utf-8")
+        (dist / "extra.md").write_text("x", encoding="utf-8", newline="\n")
         (dist / "settings.snippet.json").unlink()
         result = run_render(self.root, "--check")
         self.assertEqual(result.returncode, 1)
@@ -84,7 +84,7 @@ class CheckCommandTests(unittest.TestCase):
     def test_write_repairs_dist(self) -> None:
         dist = self.root / "hosts" / "claude" / "dist"
         (dist / "agents" / "scout.md").write_bytes(b"broken")
-        (dist / "extra.md").write_text("x", encoding="utf-8")
+        (dist / "extra.md").write_text("x", encoding="utf-8", newline="\n")
         self.assertEqual(run_render(self.root, "--write").returncode, 0)
         self.assertEqual(run_render(self.root, "--check").returncode, 0)
 
@@ -107,7 +107,7 @@ class ValidationTests(unittest.TestCase):
     def edit(self, path: Path, old: str, new: str) -> None:
         text = path.read_text(encoding="utf-8")
         self.assertIn(old, text)
-        path.write_text(text.replace(old, new, 1), encoding="utf-8")
+        path.write_text(text.replace(old, new, 1), encoding="utf-8", newline="\n")
 
     def test_security_role_cannot_resolve_to_frontier_model(self) -> None:
         self.edit(
@@ -136,8 +136,7 @@ class ValidationTests(unittest.TestCase):
         self.roles.write_text(
             self.roles.read_text(encoding="utf-8")
             + '\n[roles.ghost]\naccess = "write"\ntier = "fast"\nsecurity = false\n',
-            encoding="utf-8",
-        )
+            encoding="utf-8", newline="\n")
         self.assert_rejected("ghost")
 
 
@@ -163,7 +162,7 @@ class RefreshGoldenTests(unittest.TestCase):
             repo, root = Path(tmp) / "src", Path(tmp) / "root"
             (repo / "templates" / "agents").mkdir(parents=True)
             (repo / "templates" / "agents" / "a.md").write_bytes(b"hello\n")
-            git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+            git = ["git", "-c", "core.autocrlf=false", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
             subprocess.run([*git, "init", "-q"], check=True)
             subprocess.run([*git, "add", "."], check=True)
             subprocess.run([*git, "commit", "-qm", "x"], check=True)
@@ -183,7 +182,7 @@ class RefreshGoldenTests(unittest.TestCase):
             root = Path(tmp)
             (root / "hosts" / "claude" / "dist" / "agents").mkdir(parents=True)
             (root / "hosts" / "claude" / "dist" / "agents" / "a.md").write_bytes(b"dist\n")
-            git = ["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t"]
+            git = ["git", "-c", "core.autocrlf=false", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t"]
             subprocess.run([*git, "init", "-q"], check=True)
             subprocess.run([*git, "add", "."], check=True)
             subprocess.run([*git, "commit", "-qm", "x"], check=True)

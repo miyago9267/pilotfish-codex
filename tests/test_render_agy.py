@@ -37,7 +37,7 @@ class AgyRenderTests(rh.HostRenderCase):
     def test_read_only_role_without_tools_is_rejected(self) -> None:
         text = self.binding.read_text(encoding="utf-8")
         head, tail = text.split("[roles.scout]\ntools = ", 1)
-        self.binding.write_text(head + "[roles.scout]\n" + tail.split("\n", 1)[1], encoding="utf-8")
+        self.binding.write_text(head + "[roles.scout]\n" + tail.split("\n", 1)[1], encoding="utf-8", newline="\n")
         self.assert_rejected("scout")
 
     def test_tiers_map_to_expected_models(self) -> None:

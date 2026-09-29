@@ -85,8 +85,8 @@ class CheckCommandTests(unittest.TestCase):
 
     def test_check_fails_on_extra_or_missing_file(self) -> None:
         dist = self.root / "templates"
-        (dist / "extra.md").write_text("x", encoding="utf-8")
-        (dist / "agents" / "stray.toml").write_text("x", encoding="utf-8")
+        (dist / "extra.md").write_text("x", encoding="utf-8", newline="\n")
+        (dist / "agents" / "stray.toml").write_text("x", encoding="utf-8", newline="\n")
         (dist / "hooks.json").unlink()
         result = run_render(self.root, "--check")
         self.assertEqual(result.returncode, 1)
@@ -105,7 +105,7 @@ class CheckCommandTests(unittest.TestCase):
 
     def test_check_fails_when_source_changes_without_rewriting_dist(self) -> None:
         body = self.root / "hosts" / "codex" / "src" / "agents" / "executor.md"
-        body.write_text(body.read_text(encoding="utf-8") + "extra line\n", encoding="utf-8")
+        body.write_text(body.read_text(encoding="utf-8") + "extra line\n", encoding="utf-8", newline="\n")
         result = run_render(self.root, "--check")
         self.assertEqual(result.returncode, 1)
         self.assertIn("agents/executor.toml", result.stderr)
@@ -113,7 +113,7 @@ class CheckCommandTests(unittest.TestCase):
     def test_write_repairs_dist_and_mirror(self) -> None:
         dist = self.root / "templates"
         (dist / "agents" / "scout.toml").write_bytes(b"broken")
-        (dist / "extra.md").write_text("x", encoding="utf-8")
+        (dist / "extra.md").write_text("x", encoding="utf-8", newline="\n")
         (self.root / MIRROR).write_bytes(b"broken")
         self.assertEqual(run_render(self.root, "--write").returncode, 0)
         self.assertEqual(run_render(self.root, "--check").returncode, 0)
@@ -133,7 +133,7 @@ class BindingTests(unittest.TestCase):
     def edit(self, path: Path, old: str, new: str) -> None:
         text = path.read_text(encoding="utf-8")
         self.assertIn(old, text)
-        path.write_text(text.replace(old, new, 1), encoding="utf-8")
+        path.write_text(text.replace(old, new, 1), encoding="utf-8", newline="\n")
 
     def assert_rejected(self, expected: str) -> None:
         result = run_render(self.root, "--check")
@@ -156,8 +156,7 @@ class BindingTests(unittest.TestCase):
         self.roles.write_text(
             self.roles.read_text(encoding="utf-8")
             + '\n[roles.ghost]\naccess = "write"\ntier = "fast"\nsecurity = false\n',
-            encoding="utf-8",
-        )
+            encoding="utf-8", newline="\n")
         self.assert_rejected("ghost")
 
     def test_binding_must_declare_security_avoid_frontier(self) -> None:
@@ -178,7 +177,7 @@ class BindingTests(unittest.TestCase):
 
     def test_developer_instructions_cannot_break_the_toml_string(self) -> None:
         body = self.root / "hosts" / "codex" / "src" / "agents" / "scout.md"
-        body.write_text('bad """ body\n', encoding="utf-8")
+        body.write_text('bad """ body\n', encoding="utf-8", newline="\n")
         self.assert_rejected("scout")
 
 

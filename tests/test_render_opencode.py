@@ -65,7 +65,7 @@ class OpencodeRenderTests(rh.HostRenderCase):
         self.assert_rejected("streaming")
 
     def test_stray_role_md_is_rejected(self) -> None:
-        (self.root / "hosts" / "opencode" / "src" / "roles" / "ghost.md").write_text("x\n", encoding="utf-8")
+        (self.root / "hosts" / "opencode" / "src" / "roles" / "ghost.md").write_text("x\n", encoding="utf-8", newline="\n")
         self.assert_rejected("ghost.md")
 
 
@@ -75,7 +75,7 @@ class RefreshGoldenTests(unittest.TestCase):
             for rel, data in files.items():
                 (path / rel).parent.mkdir(parents=True, exist_ok=True)
                 (path / rel).write_bytes(data)
-            git = ["git", "-C", str(path), "-c", "user.name=t", "-c", "user.email=t@t"]
+            git = ["git", "-c", "core.autocrlf=false", "-C", str(path), "-c", "user.name=t", "-c", "user.email=t@t"]
             subprocess.run([*git, "init", "-q"], check=True)
             subprocess.run([*git, "add", "."], check=True)
             subprocess.run([*git, "commit", "-qm", "x"], check=True)

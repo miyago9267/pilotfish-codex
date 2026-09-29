@@ -36,7 +36,8 @@ SOURCES = {
 
 
 def git(repo: Path, *args: str) -> bytes:
-    return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True).stdout
+    # 關閉 autocrlf，避免 Windows runner 的全域設定讓 git archive 輸出 CRLF
+    return subprocess.run(["git", "-c", "core.autocrlf=false", "-C", str(repo), *args], check=True, capture_output=True).stdout
 
 
 def write_golden(target: Path, files: dict[Path, bytes], records: list[str]) -> int:
@@ -45,7 +46,7 @@ def write_golden(target: Path, files: dict[Path, bytes], records: list[str]) -> 
     for rel, data in files.items():
         (target / rel).parent.mkdir(parents=True, exist_ok=True)
         (target / rel).write_bytes(data)
-    (target / "SOURCE").write_text("\n".join(records), encoding="utf-8")
+    (target / "SOURCE").write_text("\n".join(records), encoding="utf-8", newline="\n")
     print(f"已匯入 {len(files)} 個檔案到 {target}")
     return 0
 
