@@ -10,7 +10,7 @@ from render_helpers import ROOT, render
 class GrokRenderTests(rh.HostRenderCase):
     HOST = "grok"
     GOLDEN_COUNT = 15
-    SOURCE_REFS = ("b65a243",)
+    SOURCE_REFS = ("shoal@",)
     DIST_FILE = "roles/scout.toml"
     SRC_FILE = "agents/executor.md"
 

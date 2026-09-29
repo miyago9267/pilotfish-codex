@@ -9,7 +9,7 @@ from render_helpers import ROOT, render
 class AgyRenderTests(rh.HostRenderCase):
     HOST = "agy"
     GOLDEN_COUNT = 9
-    SOURCE_REFS = ("b65a243",)
+    SOURCE_REFS = ("shoal@",)
     DIST_FILE = "agents/scout/agent.md"
     SRC_FILE = "agents/executor.md"
 

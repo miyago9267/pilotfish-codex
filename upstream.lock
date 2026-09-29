@@ -17,6 +17,7 @@ upstream = "Nanako0129/pilotfish"
 version = "v1.4.2"
 source = "pilotfish-claude 1ea9841 templates（1.4.2-claude.1，另移植 codex 1.8.1 的 7 段規則）"
 path = "hosts/claude/src"
+marker_version = "1.4.2-claude.1"  # <!-- pilotfish-claude v... --> 的版本（R8）
 
 [codex]
 kind = "compare-base"
@@ -24,3 +25,11 @@ upstream = "Nanako0129/pilotfish"
 version = "v1.3.0"
 source = "pilotfish-codex 61a411b templates（本 repo 為 1.8.1，上游對照停在 v1.3.0，2026-07-22）"
 path = "hosts/codex/src"
+
+[agy]
+kind = "fork-base"
+upstream = "Nanako0129/pilotfish-grok"
+version = "v1.0.6"
+source = "dotfile plugins/pilotfish-agy/templates @ b65a243（改寫自 pilotfish-grok，原本沒有版本號）"
+path = "hosts/agy/src"
+marker_version = "0.1.0"  # <!-- pilotfish-agy v... --> 的版本（R8）；agy 沒有既有版本，從 0.1.0 起算

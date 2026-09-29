@@ -1,4 +1,5 @@
-repo: /Users/miyago/Project/Active/Forks/Fork-Remaster-code/pilotfish-claude
-ref: 1ea9841
-commit: 1ea9841297f9d3d560482e5ff93292dea69f1b2e
-path: templates/
+repo: shoal
+ref: shoal@9d07203
+commit: 9d07203f2ffd639801845a9c1f54b8d308dfd570
+path: hosts/claude/dist
+dirty: true

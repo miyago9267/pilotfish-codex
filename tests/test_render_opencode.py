@@ -14,7 +14,7 @@ from render_helpers import ROOT, render
 class OpencodeRenderTests(rh.HostRenderCase):
     HOST = "opencode"
     GOLDEN_COUNT = 7
-    SOURCE_REFS = ("39bdff9", "b65a243")
+    SOURCE_REFS = ("shoal@",)
     DIST_FILE = "roles/scout.md"
     SRC_FILE = "roles/executor.md"
 

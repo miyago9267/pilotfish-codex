@@ -1,4 +1,5 @@
-repo: /Users/miyago/Project/Active/Forks/Fork-Remaster-code/pilotfish-codex
-ref: 61a411b
-commit: 61a411bf48599c5c8646b8265f83a8b8dab9b85f
-path: templates/
+repo: shoal
+ref: shoal@9d07203
+commit: 9d07203f2ffd639801845a9c1f54b8d308dfd570
+path: templates
+dirty: false

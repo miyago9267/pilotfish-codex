@@ -1,4 +1,5 @@
-repo: /Users/miyago/dotfile
-ref: b65a243
-commit: b65a2436d3c1e11e13f9d911989635578627411b
-path: plugins/pilotfish-grok/templates
+repo: shoal
+ref: shoal@9d07203
+commit: 9d07203f2ffd639801845a9c1f54b8d308dfd570
+path: hosts/grok/dist
+dirty: false

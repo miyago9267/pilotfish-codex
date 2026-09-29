@@ -51,7 +51,7 @@ class GoldenTests(unittest.TestCase):
             self.assertEqual(rendered[rel], data, rel)
 
     def test_golden_records_source(self) -> None:
-        self.assertIn("ref: 61a411b", (GOLDEN / "SOURCE").read_text(encoding="utf-8"))
+        self.assertRegex((GOLDEN / "SOURCE").read_text(encoding="utf-8"), r"(?m)^ref: shoal@[0-9a-f]{7}$")
 
     def test_committed_templates_match_golden(self) -> None:
         dist = ROOT / "templates"

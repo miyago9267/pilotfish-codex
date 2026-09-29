@@ -42,7 +42,7 @@ class GoldenTests(unittest.TestCase):
             self.assertEqual(rendered[rel], data, rel)
 
     def test_golden_records_source(self) -> None:
-        self.assertIn("ref: 1ea9841", (GOLDEN / "SOURCE").read_text(encoding="utf-8"))
+        self.assertRegex((GOLDEN / "SOURCE").read_text(encoding="utf-8"), r"(?m)^ref: shoal@[0-9a-f]{7}$")
 
     def test_committed_dist_matches_golden(self) -> None:
         dist = ROOT / "hosts" / "claude" / "dist"
@@ -173,6 +173,34 @@ class RefreshGoldenTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual((root / "tests/golden/claude/agents/a.md").read_bytes(), b"hello\n")
             self.assertTrue(re.search(rf"ref: {sha}", (root / "tests/golden/claude/SOURCE").read_text()))
+
+
+    def test_from_dist_copies_own_dist_and_records_shoal_sha(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "hosts" / "claude" / "dist" / "agents").mkdir(parents=True)
+            (root / "hosts" / "claude" / "dist" / "agents" / "a.md").write_bytes(b"dist\n")
+            git = ["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t"]
+            subprocess.run([*git, "init", "-q"], check=True)
+            subprocess.run([*git, "add", "."], check=True)
+            subprocess.run([*git, "commit", "-qm", "x"], check=True)
+            sha = subprocess.run([*git, "rev-parse", "--short=7", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+            args = [sys.executable, str(ROOT / "tools" / "refresh_golden.py"), "--host", "claude", "--from-dist", "--root", str(root)]
+            result = subprocess.run(args, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            golden = root / "tests" / "golden" / "claude"
+            self.assertEqual((golden / "agents" / "a.md").read_bytes(), b"dist\n")
+            source = (golden / "SOURCE").read_text()
+            self.assertIn(f"ref: shoal@{sha}\n", source)
+            self.assertIn("dirty: false", source)
+            (root / "hosts" / "claude" / "dist" / "agents" / "a.md").write_bytes(b"changed\n")
+            subprocess.run(args, capture_output=True, text=True, check=True)
+            self.assertIn("dirty: true", (golden / "SOURCE").read_text())
+
+    def test_without_source_or_from_dist_is_rejected(self) -> None:
+        result = subprocess.run([sys.executable, str(ROOT / "tools" / "refresh_golden.py"), "--host", "claude"],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
 
 
 if __name__ == "__main__":

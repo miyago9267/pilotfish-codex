@@ -77,7 +77,7 @@ class HostRenderCase(unittest.TestCase):
     def test_golden_records_source(self) -> None:
         source = (ROOT / "tests" / "golden" / self.HOST / "SOURCE").read_text(encoding="utf-8")
         for ref in self.SOURCE_REFS:
-            self.assertIn(f"ref: {ref}", source)
+            self.assertRegex(source, rf"(?m)^ref: {ref}[0-9a-f]{{7}}$")
 
     def test_committed_dist_matches_golden(self) -> None:
         self.assertEqual(dist_files(self.HOST), golden_files(self.HOST))
