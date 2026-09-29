@@ -1,6 +1,7 @@
 """agy / grok / opencode 三個 host 的 render 測試共用的 helper。"""
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -28,7 +29,8 @@ def dist_files(host: str) -> dict[str, bytes]:
 
 def run_render(host: str, root: Path, *flags: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run([sys.executable, str(RENDER), "--host", host, "--root", str(root), *flags],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, encoding="utf-8",
+                          env={**os.environ, "PYTHONIOENCODING": "utf-8"})
 
 
 class HostRenderCase(unittest.TestCase):

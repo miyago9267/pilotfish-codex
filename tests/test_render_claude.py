@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -29,6 +30,8 @@ def run_render(root: Path, *flags: str) -> subprocess.CompletedProcess[str]:
         [sys.executable, str(RENDER), "--host", "claude", "--root", str(root), *flags],
         capture_output=True,
         text=True,
+        # Windows 預設 cp1252，強制 UTF-8 才讀得到中文輸出
+        encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
 
 
@@ -168,7 +171,7 @@ class RefreshGoldenTests(unittest.TestCase):
             result = subprocess.run(
                 [sys.executable, str(ROOT / "tools" / "refresh_golden.py"), "--host", "claude",
                  "--from", str(repo), "--ref", sha, "--root", str(root)],
-                capture_output=True, text=True,
+                capture_output=True, text=True, encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual((root / "tests/golden/claude/agents/a.md").read_bytes(), b"hello\n")
@@ -186,7 +189,7 @@ class RefreshGoldenTests(unittest.TestCase):
             subprocess.run([*git, "commit", "-qm", "x"], check=True)
             sha = subprocess.run([*git, "rev-parse", "--short=7", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
             args = [sys.executable, str(ROOT / "tools" / "refresh_golden.py"), "--host", "claude", "--from-dist", "--root", str(root)]
-            result = subprocess.run(args, capture_output=True, text=True)
+            result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"})
             self.assertEqual(result.returncode, 0, result.stderr)
             golden = root / "tests" / "golden" / "claude"
             self.assertEqual((golden / "agents" / "a.md").read_bytes(), b"dist\n")
@@ -194,12 +197,12 @@ class RefreshGoldenTests(unittest.TestCase):
             self.assertIn(f"ref: shoal@{sha}\n", source)
             self.assertIn("dirty: false", source)
             (root / "hosts" / "claude" / "dist" / "agents" / "a.md").write_bytes(b"changed\n")
-            subprocess.run(args, capture_output=True, text=True, check=True)
+            subprocess.run(args, capture_output=True, text=True, check=True, encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"})
             self.assertIn("dirty: true", (golden / "SOURCE").read_text())
 
     def test_without_source_or_from_dist_is_rejected(self) -> None:
         result = subprocess.run([sys.executable, str(ROOT / "tools" / "refresh_golden.py"), "--host", "claude"],
-                                capture_output=True, text=True)
+                                capture_output=True, text=True, encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         self.assertEqual(result.returncode, 2)
 
 

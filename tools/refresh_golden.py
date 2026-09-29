@@ -62,6 +62,9 @@ def import_from_dist(host: str, root: Path) -> tuple[dict[Path, bytes], str]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows 預設 cp1252，輸出中文會拋 UnicodeEncodeError，強制 UTF-8
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--host", required=True, choices=sorted(SOURCES))
     parser.add_argument("--from", dest="repo", type=Path)

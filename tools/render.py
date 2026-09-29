@@ -439,6 +439,9 @@ def diff_mirrors(root: Path, host: str, files: dict[str, bytes]) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows 預設 cp1252，輸出中文會拋 UnicodeEncodeError，強制 UTF-8
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--host", required=True, choices=sorted(RENDERERS))
     mode = parser.add_mutually_exclusive_group(required=True)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -30,6 +31,8 @@ def run_render(root: Path, *flags: str) -> subprocess.CompletedProcess[str]:
         [sys.executable, str(RENDER), "--host", "codex", "--root", str(root), *flags],
         capture_output=True,
         text=True,
+        # Windows 預設 cp1252，強制 UTF-8 才讀得到中文輸出
+        encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
 
 

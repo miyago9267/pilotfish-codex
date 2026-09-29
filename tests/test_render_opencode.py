@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -87,8 +88,8 @@ class RefreshGoldenTests(unittest.TestCase):
                                             ".opencode/pilotfish/pi-routing.json": b"pi\n"})
             args = [sys.executable, str(ROOT / "tools" / "refresh_golden.py"), "--host", "opencode",
                     "--from", str(base / "oc"), "--ref", sha1, "--root", str(base / "root")]
-            self.assertEqual(subprocess.run(args, capture_output=True, text=True).returncode, 2)  # 缺 --extra-*
-            result = subprocess.run([*args, "--extra-from", str(base / "dot"), "--extra-ref", sha2], capture_output=True, text=True)
+            self.assertEqual(subprocess.run(args, capture_output=True, text=True, encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"}).returncode, 2)  # 缺 --extra-*
+            result = subprocess.run([*args, "--extra-from", str(base / "dot"), "--extra-ref", sha2], capture_output=True, text=True, encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"})
             self.assertEqual(result.returncode, 0, result.stderr)
             golden = base / "root" / "tests" / "golden" / "opencode"
             self.assertEqual((golden / "roles" / "scout.md").read_bytes(), b"scout\n")
