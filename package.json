@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "bun@1.3.11",
   "scripts": {
-    "lint:md": "markdownlint-cli2 \"**/*.md\" \"#node_modules\" \"#.ai\"",
+    "lint:md": "markdownlint-cli2 \"**/*.md\" \"#node_modules\" \"#.ai\" \"#hosts/*/src\" \"#hosts/*/dist\" \"#tests/golden\" \"#hosts/opencode/plugin\"",
     "charts:usage-routing": "bun tools/generate_usage_routing_charts.mjs"
   },
   "devDependencies": {
