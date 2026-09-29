@@ -1,0 +1,9 @@
+repo: /Users/miyago/Project/Active/Forks/Fork-Remaster-code/pilotfish-opencode
+ref: 39bdff9
+commit: 39bdff99907e02a41b53062dc195848ac9bd3e73
+path: roles
+
+repo: /Users/miyago/dotfile
+ref: b65a243
+commit: b65a2436d3c1e11e13f9d911989635578627411b
+path: .opencode/pilotfish/catalog.json .opencode/pilotfish/routing.json

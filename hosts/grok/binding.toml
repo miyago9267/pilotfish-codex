@@ -1,0 +1,51 @@
+# grok host binding：每個 role 的 roles/*.toml（description、capability mode、reasoning effort）。
+# 數值等於 dotfile b65a243 的 plugins/pilotfish-grok/templates/roles/（vendored 自
+# Nanako0129/pilotfish-grok v1.0.6，見 upstream.lock）。
+# agents/*.md 與 config.snippet.toml 逐字放在 src/，不經 render 改寫。
+
+# grok 的 security role 不受 Anthropic 分類器限制。
+security_avoid_frontier = false
+
+# 所有 agent 的 frontmatter 都是 model: inherit；effort 寫在 roles/*.toml 的 reasoning_effort。
+# render 會驗證 src/agents/<role>.md 的 model 等於這裡解析出的值。
+[tiers]
+fast = "inherit"
+standard = "inherit"
+strong = "inherit"
+frontier = "inherit"
+
+[roles.scout]
+comment = "Role defaults applied when spawning subagent_type \"scout\"."
+effort = "low"
+capability_mode = "read-only"
+description = "Read-only reconnaissance for broad codebase sweeps or focused lookup"
+
+[roles.mech-executor]
+effort = "low"
+capability_mode = "all"
+description = "Mechanical implementation from a complete specification"
+
+[roles.executor]
+effort = "medium"
+capability_mode = "all"
+description = "Implementation requiring local engineering judgment"
+
+[roles.plan-verifier]
+effort = "medium"
+capability_mode = "read-only"
+description = "Read-only Plan readiness challenge before approval"
+
+[roles.verifier]
+effort = "medium"
+capability_mode = "execute"
+description = "Fresh-context outcome verification (read and run, never edit)"
+
+[roles.security-reviewer]
+effort = "high"
+capability_mode = "read-only"
+description = "Read-only security evidence before approval"
+
+[roles.security-executor]
+effort = "high"
+capability_mode = "all"
+description = "Approved security-sensitive implementation"

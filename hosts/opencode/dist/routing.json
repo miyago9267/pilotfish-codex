@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "roles": {
+    "scout": {
+      "agent": "scout",
+      "candidates": [
+        {
+          "provider": "deepseek",
+          "model": "deepseek-v4-flash"
+        },
+        {
+          "provider": "google",
+          "model": "gemini-2.5-flash"
+        }
+      ],
+      "fallback": "ordered_candidates",
+      "requiredCapabilities": [
+        "tools",
+        "streaming"
+      ]
+    },
+    "executor": {
+      "agent": "executor",
+      "candidates": [
+        {
+          "provider": "openai",
+          "model": "gpt-5.6-luna"
+        },
+        {
+          "provider": "xai",
+          "model": "grok-4.6"
+        }
+      ],
+      "fallback": "same_capability",
+      "requiredCapabilities": [
+        "tools",
+        "streaming",
+        "reasoning"
+      ]
+    },
+    "verifier": {
+      "agent": "verifier",
+      "candidates": [
+        {
+          "provider": "openai",
+          "model": "gpt-5.6-sol"
+        },
+        {
+          "provider": "xai",
+          "model": "grok-4.6"
+        }
+      ],
+      "fallback": "same_capability",
+      "requiredCapabilities": [
+        "tools",
+        "streaming",
+        "reasoning"
+      ]
+    },
+    "security-reviewer": {
+      "agent": "security-reviewer",
+      "candidates": [
+        {
+          "provider": "openai",
+          "model": "gpt-5.6-sol"
+        }
+      ],
+      "fallback": "none",
+      "requiredCapabilities": [
+        "tools",
+        "streaming",
+        "reasoning"
+      ]
+    },
+    "security-executor": {
+      "agent": "security-executor",
+      "candidates": [
+        {
+          "provider": "openai",
+          "model": "gpt-5.6-sol"
+        },
+        {
+          "provider": "openai",
+          "model": "gpt-5.6-luna"
+        }
+      ],
+      "fallback": "same_capability",
+      "requiredCapabilities": [
+        "tools",
+        "streaming",
+        "reasoning"
+      ]
+    }
+  }
+}

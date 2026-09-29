@@ -1,0 +1,3 @@
+description = "Implementation requiring local engineering judgment"
+default_capability_mode = "all"
+reasoning_effort = "medium"

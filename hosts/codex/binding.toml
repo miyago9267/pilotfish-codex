@@ -1,0 +1,57 @@
+# Codex host binding：tier 對應 model、每個 role 的 effort / description / sandbox。
+# 數值等於 pilotfish-codex 61a411b 的 templates/ 現況；templates/ 就是 codex 的 dist。
+
+# codex 的 security role 本來就用 sol（同時是 frontier），不套用 Anthropic 分類器的限制。
+security_avoid_frontier = false
+
+[tiers]
+fast = "gpt-6-luna"
+standard = "gpt-6-astra"
+strong = "gpt-6-sol"
+frontier = "gpt-6-sol"
+
+# config.snippet.toml 的 root model 與 effort；model 由 tier 解析。
+[root]
+tier = "fast"
+model_reasoning_effort = "max"
+plan_mode_reasoning_effort = "xhigh"
+
+[roles.scout]
+effort = "low"
+sandbox_mode = "read-only"
+description = "Read-only reconnaissance for broad codebase sweeps or focused lookup of files, symbols, usages, configuration values, and existing flows."
+
+[roles.mech-executor]
+effort = "medium"
+description = "Mechanical implementation from a complete specification: patterned refactors, convention-following tests, documentation, bulk edits, and routine verification."
+
+[roles.executor]
+effort = "high"
+description = "Implementation requiring local engineering judgment: features, bug fixes, integration, and design-sensitive refactors."
+
+[roles.plan-verifier]
+effort = "high"
+sandbox_mode = "read-only"
+description = "Read-only Sol review of a material Plan: readiness review before approval or one-shot semantic adjudication after a fingerprinted Luna disagreement."
+
+[roles.verifier]
+effort = "high"
+sandbox_mode = "workspace-write"
+description = "Fresh-context calibrated outcome or direction-checkpoint verification. Given an explicit contract, independently runs checks and returns CONFIRMED/REFUTED/INCONCLUSIVE for completed outcomes or CONTINUE/PIVOT/ROLLBACK for direction checkpoints. Read-and-run only; never plans, edits, fixes, or delegates."
+
+[roles.security-reviewer]
+effort = "high"
+sandbox_mode = "read-only"
+web_search = "live"
+description = "Read-only security analysis before approval for authentication, authorization, secrets, crypto, validation, hardening, dependency evidence, and threat review."
+
+[roles.security-executor]
+effort = "high"
+description = "Security-sensitive implementation after approval for authentication, authorization, secrets, crypto, validation, hardening, and dependency remediation."
+
+# codex 專屬 role，不屬於 core；model 明確指定，不經 tier。
+[extra_roles.sol-executor]
+model = "gpt-6-sol"
+access = "write"
+effort = "high"
+description = "Bounded implementation requiring normal engineering judgment: routine features, bug fixes, integration, and ordinary tool-assisted changes."

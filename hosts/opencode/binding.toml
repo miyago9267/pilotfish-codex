@@ -1,0 +1,77 @@
+# OpenCode host binding：tier 對應 provider/model、每個 role 的 fallback 與必要能力，
+# 以及 catalog.json 的 provider 清單。render 產生 dist/catalog.json 與 dist/routing.json。
+# 數值等於 dotfile b65a243 的 .opencode/pilotfish/{catalog,routing}.json 現況。
+# pi-routing.json 由 dotfile 擁有，不在這裡產生。
+
+security_avoid_frontier = false
+
+# OpenCode 沒有 mech-executor、plan-verifier；這兩個 role 不產生 agent，也不進 routing。
+omitted_roles = ["mech-executor", "plan-verifier"]
+
+[routing]
+version = 1
+
+# 每個 role 的第一順位 candidate 由 tier 解析。
+[tiers]
+fast = { provider = "deepseek", model = "deepseek-v4-flash" }
+standard = { provider = "openai", model = "gpt-5.6-luna" }
+strong = { provider = "openai", model = "gpt-5.6-sol" }
+frontier = { provider = "openai", model = "gpt-5.6-sol" }
+
+# fallback：none / ordered_candidates / same_capability；fallback_candidates 接在第一順位之後。
+[roles.scout]
+fallback = "ordered_candidates"
+fallback_candidates = [{ provider = "google", model = "gemini-2.5-flash" }]
+required_capabilities = ["tools", "streaming"]
+
+[roles.executor]
+fallback = "same_capability"
+fallback_candidates = [{ provider = "xai", model = "grok-4.6" }]
+required_capabilities = ["tools", "streaming", "reasoning"]
+
+[roles.verifier]
+fallback = "same_capability"
+fallback_candidates = [{ provider = "xai", model = "grok-4.6" }]
+required_capabilities = ["tools", "streaming", "reasoning"]
+
+[roles.security-reviewer]
+fallback = "none"
+fallback_candidates = []
+required_capabilities = ["tools", "streaming", "reasoning"]
+
+[roles.security-executor]
+fallback = "same_capability"
+fallback_candidates = [{ provider = "openai", model = "gpt-5.6-luna" }]
+required_capabilities = ["tools", "streaming", "reasoning"]
+
+# catalog.json 的 providers；key 順序即輸出順序。
+[providers.deepseek]
+authenticated = true
+identity = "direct"
+[providers.deepseek.models."deepseek-v4-flash"]
+supported = ["tools", "streaming", "reasoning"]
+source = "catalog"
+
+[providers.google]
+authenticated = true
+identity = "direct"
+[providers.google.models."gemini-2.5-flash"]
+supported = ["tools", "streaming"]
+source = "catalog"
+
+[providers.openai]
+authenticated = true
+identity = "direct"
+[providers.openai.models."gpt-5.6-luna"]
+supported = ["tools", "streaming", "reasoning"]
+source = "catalog"
+[providers.openai.models."gpt-5.6-sol"]
+supported = ["tools", "streaming", "reasoning"]
+source = "catalog"
+
+[providers.xai]
+authenticated = true
+identity = "direct"
+[providers.xai.models."grok-4.6"]
+supported = ["tools", "streaming", "reasoning"]
+source = "catalog"

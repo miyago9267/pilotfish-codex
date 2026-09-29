@@ -1,0 +1,38 @@
+{
+  "name": "pilotfish-opencode",
+  "version": "0.1.0",
+  "description": "Role-based routing primitives and an explicit OpenCode plugin.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "bun": ">=1.3.0",
+    "opencode": ">=1.18.19 <2"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./resolver": "./dist/route-resolution.js",
+    "./plugin": "./dist/plugin/pilotfish-opencode.js"
+  },
+  "files": [
+    "dist",
+    "roles",
+    "docs",
+    "install",
+    "LICENSE",
+    "README.md",
+    "README.zh-TW.md",
+    "VERSION"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "bun test tests",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "1.18.19"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0",
+    "typescript": "^5.8.2"
+  }
+}

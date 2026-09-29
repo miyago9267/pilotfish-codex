@@ -1,0 +1,4 @@
+# Role defaults applied when spawning subagent_type "scout".
+description = "Read-only reconnaissance for broad codebase sweeps or focused lookup"
+default_capability_mode = "read-only"
+reasoning_effort = "low"

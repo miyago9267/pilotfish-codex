@@ -1,0 +1,38 @@
+# Canonical role catalog：host 中立，不寫任何 model 名稱。
+# access: read-only / write / verify；tier: fast / standard / strong / frontier。
+# security = true 的 role 是否可解析到 frontier model，由各 host binding 的 security_avoid_frontier 決定。
+
+[roles.scout]
+access = "read-only"
+tier = "fast"
+security = false
+
+[roles.mech-executor]
+access = "write"
+tier = "fast"
+security = false
+
+[roles.executor]
+access = "write"
+tier = "standard"
+security = false
+
+[roles.plan-verifier]
+access = "read-only"
+tier = "frontier"
+security = false
+
+[roles.verifier]
+access = "verify"
+tier = "strong"
+security = false
+
+[roles.security-reviewer]
+access = "read-only"
+tier = "strong"
+security = true
+
+[roles.security-executor]
+access = "write"
+tier = "strong"
+security = true

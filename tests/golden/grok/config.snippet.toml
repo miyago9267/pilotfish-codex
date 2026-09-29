@@ -1,0 +1,42 @@
+# Pilotfish-grok owned keys. Merge into ~/.grok/config.toml.
+# Do not force the main-session model or default_reasoning_effort —
+# those stay under the user's control.
+
+[subagents]
+enabled = true
+
+# Keep Claude Code user agents from shadowing Grok-native types. The installer
+# adds every Claude agent name found by `grok inspect`; Explore is the known
+# pilotfish collision and is kept here as the static baseline.
+[subagents.toggle]
+"Explore" = false
+
+# pilotfish-grok uses native Grok rules, roles, agents, and session state.
+# Disable every Claude compatibility cell so Grok does not import Claude Code
+# instructions, skills, MCPs, hooks, or future session scanners.
+[compat.claude]
+skills = false
+rules = false
+agents = false
+mcps = false
+hooks = false
+sessions = false
+
+# Claude plugin discovery is independent of [compat.claude]. The installer
+# must merge every plugin name whose `grok inspect --json` path is under
+# ~/.claude/ into [plugins].disabled. The names are machine-specific, so they
+# cannot be represented safely in this static snippet.
+
+# Optional multi-model pins (highest priority over agent frontmatter).
+# Leave commented to inherit the parent session model. When cheaper models
+# exist in your catalog, pin recon/mechanical roles here without editing policy.
+#
+# [subagents.models]
+# scout = "grok-4.5"
+# plan-verifier = "grok-4.5"
+# security-reviewer = "grok-4.5"
+# mech-executor = "grok-4.5"
+# executor = "grok-4.5"
+# verifier = "grok-4.5"
+# security-executor = "grok-4.5"
+# explore = "grok-4.5"   # built-in explore only; pilotfish-grok does not install an Explore agent

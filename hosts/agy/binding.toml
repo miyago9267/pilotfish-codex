@@ -1,0 +1,70 @@
+# agy (Gemini / Antigravity) host binding：tier 對應 model、每個 role 的 tools 與 description。
+# 數值等於 dotfile b65a243 的 plugins/pilotfish-agy/templates/ 現況。
+# description 的換行與 agent.md 的 folded scalar（description: >）逐行對應。
+
+# agy 的 security role 不受 Anthropic 分類器限制。
+security_avoid_frontier = false
+
+# agy 的 agent frontmatter 沒有 effort 欄位：明確宣告不支援，render 不輸出 effort，
+# 而且 role 不可設 effort（設了會被 render 拒絕，避免以為有生效）。
+supports_effort = false
+
+# model 欄位只接受 flash / pro / inherit。
+[tiers]
+fast = "flash"
+standard = "pro"
+strong = "pro"
+frontier = "pro"
+
+[roles.scout]
+tools = ["view_file", "grep_search", "find_by_name", "list_dir", "send_message"]
+description = '''
+Read-only reconnaissance for broad codebase sweeps or focused lookup of files,
+symbols, usages, configuration values, and existing flows. Returns concise
+findings with file:line references.
+'''
+
+[roles.mech-executor]
+description = '''
+Mechanical execution of fully-specified work: pattern-based refactors and
+renames, tests that follow existing conventions, documentation updates, bulk
+edits from an explicit spec. Needs no design decisions.
+'''
+
+[roles.executor]
+description = '''
+Implementation requiring judgment: feature work, bug fixes, refactors with
+local design decisions, integration work. Give it the goal, constraints, and
+done criteria.
+'''
+
+[roles.plan-verifier]
+tools = ["view_file", "grep_search", "find_by_name", "list_dir", "send_message"]
+description = '''
+Read-only fresh-context review of one stable Plan envelope or execution slice
+before approval. Returns bare READY or structured REVISE; never executes,
+writes, or fixes.
+'''
+
+[roles.verifier]
+tools = ["view_file", "grep_search", "find_by_name", "list_dir", "send_message", "run_command"]
+description = '''
+Fresh-context calibrated outcome verification after implementation. Give it
+the claimed acceptance and relevant diff or paths; it runs tests, drives the
+affected flow, and returns CONFIRMED, REFUTED, or INCONCLUSIVE.
+'''
+
+[roles.security-reviewer]
+tools = ["view_file", "grep_search", "find_by_name", "list_dir", "send_message", "read_url_content", "search_web"]
+description = '''
+Read-only security analysis before approval: authentication/authorization,
+secrets, crypto, validation, hardening, dependency vulnerabilities, and threat
+review. Gathers evidence for the main-session Plan; never implements fixes.
+'''
+
+[roles.security-executor]
+description = '''
+Security-sensitive implementation after approval: authentication and
+authorization, secrets handling, crypto usage, input validation, hardening,
+dependency remediation. Takes only an approved, stable contract.
+'''

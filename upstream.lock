@@ -1,0 +1,26 @@
+# 記錄各 host 對應的上游與版本（spec R6）。
+# 同步上游只透過人工 diff review，不自動更新。
+# kind: vendored = 上游文字逐字放進 hosts/<host>/src/
+#       fork-base = 由上游 fork 出來，policy 已分岔，此為 fork 的基準版本
+#       compare-base = 目前對照追到的上游版本，內容已自行演進
+
+[grok]
+kind = "vendored"
+upstream = "Nanako0129/pilotfish-grok"
+version = "v1.0.6"
+source = "dotfile plugins/pilotfish-grok/templates @ b65a243"
+path = "hosts/grok/src"
+
+[claude]
+kind = "fork-base"
+upstream = "Nanako0129/pilotfish"
+version = "v1.4.2"
+source = "pilotfish-claude 1ea9841 templates（1.4.2-claude.1，另移植 codex 1.8.1 的 7 段規則）"
+path = "hosts/claude/src"
+
+[codex]
+kind = "compare-base"
+upstream = "Nanako0129/pilotfish"
+version = "v1.3.0"
+source = "pilotfish-codex 61a411b templates（本 repo 為 1.8.1，上游對照停在 v1.3.0，2026-07-22）"
+path = "hosts/codex/src"

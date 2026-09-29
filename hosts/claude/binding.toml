@@ -1,0 +1,54 @@
+# Claude host binding：tier 對應 model、每個 role 的 effort / description / 工具限制。
+# 數值等於 pilotfish-claude 1ea9841 目前上線的設定。
+
+# security role 不得解析到 frontier model（Anthropic 分類器會誤拒防禦性資安工作）。
+security_avoid_frontier = true
+
+[tiers]
+fast = "sonnet"
+standard = "sonnet"
+strong = "opus"
+frontier = "fable"
+
+[roles.scout]
+effort = "low"
+tools = ["Read", "Glob", "Grep"]
+description = "Read-only reconnaissance. Use for any search, lookup, or \"where/how is X\" question that requires no judgment - locating files, symbols, usages, config values, or summarizing how something works across a codebase. Returns concise findings with file:line references. Cheapest way to gather facts; prefer it over reading files yourself when more than a couple of files are involved."
+
+[roles.mech-executor]
+effort = "low"
+disallowedTools = ["Agent", "Workflow"]
+description = "Mechanical execution of fully-specified work - pattern-based refactors and renames, writing tests that follow existing conventions, documentation updates, bulk multi-file edits from an explicit spec, running test suites and fixing trivial failures. Use when the task needs no design decisions; give it a complete spec (goal, exact scope, done-criteria)."
+
+[roles.executor]
+effort = "high"
+disallowedTools = ["Agent", "Workflow"]
+description = "Implementation requiring judgment - feature work, bug fixes, refactors with design decisions, integration work. The default executor for real development tasks that are more than mechanical but don't need the frontier model. Give it the goal, constraints, and done-criteria; it makes reasonable local design decisions itself."
+
+[roles.plan-verifier]
+effort = "medium"
+tools = ["Read", "Glob", "Grep"]
+description = "Read-only fresh-context review of one stable Plan envelope or execution slice before approval. Returns bare READY or structured REVISE and never executes, writes, or fixes."
+
+[roles.verifier]
+effort = "medium"
+disallowedTools = ["Write", "Edit", "NotebookEdit", "Agent", "Workflow"]
+description = "Fresh-context calibrated outcome verification after implementation. Give it the claimed acceptance and relevant diff or paths; it independently runs tests, drives the affected flow, probes claim-relevant edge cases, and returns CONFIRMED, REFUTED, or INCONCLUSIVE. Read-and-run only; it never plans, edits, fixes, or delegates."
+
+[roles.security-reviewer]
+effort = "high"
+tools = ["Read", "Glob", "Grep", "WebSearch", "WebFetch"]
+description = "Read-only security analysis before approval - authentication/authorization, secrets, crypto, validation, hardening, dependency vulnerability evidence, and threat review. Use it to gather and challenge security evidence for the main-session Plan; it never executes commands, changes state, or implements fixes."
+
+[roles.security-executor]
+effort = "medium"
+disallowedTools = ["Agent", "Workflow"]
+description = "Security-sensitive implementation after approval - authentication/authorization, secrets handling, crypto usage, input validation, hardening, and dependency remediation. Give it only an approved, stable execution contract; pre-approval analysis belongs to security-reviewer."
+
+# host 專屬 role，不屬於 core；model 明確指定，不經 tier。
+[extra_roles.Explore]
+model = "haiku"
+access = "read-only"
+effort = "low"
+tools = ["Read", "Glob", "Grep"]
+description = "Read-only search agent for broad fan-out searches - when answering means sweeping many files, directories, or naming conventions and you only need the conclusion, not the file dumps. It reads excerpts rather than whole files, so it locates code; it doesn't review or audit it. Specify search breadth - \"medium\" for moderate exploration, \"very thorough\" for multiple locations and naming conventions."

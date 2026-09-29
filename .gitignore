@@ -6,3 +6,7 @@ artifacts/usage-routing/
 
 # Generated live experiment reports stay local evidence.
 docs/specs/adaptive-intent-routing/live-run-*.json
+
+# opencode plugin 的建置產物與依賴（不進工作樹）。
+hosts/opencode/plugin/node_modules/
+hosts/opencode/plugin/dist/
