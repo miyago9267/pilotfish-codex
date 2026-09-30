@@ -1,5 +1,18 @@
 # pilotfish-codex
 
+> [!IMPORTANT]
+> **This repository has moved to
+> [miyago9267/shoal](https://github.com/miyago9267/shoal).**
+> shoal renders one role catalog into five hosts (Claude Code, Codex CLI,
+> Gemini/agy, Grok Build, OpenCode); the Codex host lives in
+> `hosts/codex/` there. v1.8.1 is the last Codex-only release published here.
+> Existing pinned installs (`--ref v1.8.1` and earlier) keep working from this
+> repository; new installs should use shoal.
+>
+> 本 repo 已遷移到 [miyago9267/shoal](https://github.com/miyago9267/shoal)。
+> v1.8.1 是最後一個只支援 Codex 的版本；既有 pinned ref 仍可從這裡安裝，
+> 新安裝請改用 shoal。
+
 > A Codex-native orchestration layer that chooses a realistic first move for
 > clear work, broad changes, and open-ended ideas.
 
